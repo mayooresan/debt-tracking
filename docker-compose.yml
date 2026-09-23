@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  monthly-planner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: monthly-planner:latest
+    container_name: monthly-planner
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/budget.db
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+      - BASE_CURRENCY=${BASE_CURRENCY:-USD}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.monthly-planner.rule=Host(`debt.jaymayu.com`)"
+      - "traefik.http.routers.monthly-planner.entrypoints=websecure"
+      - "traefik.http.routers.monthly-planner.tls.certresolver=letsencrypt"
+      - "traefik.http.services.monthly-planner.loadbalancer.server.port=3000"
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
