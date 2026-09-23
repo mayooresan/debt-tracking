@@ -151,6 +151,23 @@ describe('Currency Service & Exchange Rates', () => {
       expect(rates.CAD).toBe(1.33);
     });
 
+    it('should preserve fallback rates for uncached currencies when database has partial cache', () => {
+      // Only insert EUR into database
+      db.prepare(`
+        INSERT INTO exchange_rates (base_currency, target_currency, rate)
+        VALUES ('USD', 'EUR', 0.88)
+      `).run();
+
+      const rates = getExchangeRates(db);
+      // Cached rate is used
+      expect(rates.EUR).toBe(0.88);
+      expect(rates.USD).toBe(1.0);
+      // Uncached currencies still have fallback rates
+      expect(rates.GBP).toBe(DEFAULT_FALLBACK_RATES.GBP);
+      expect(rates.JPY).toBe(DEFAULT_FALLBACK_RATES.JPY);
+      expect(rates.INR).toBe(DEFAULT_FALLBACK_RATES.INR);
+    });
+
     it('should return Map from getExchangeRatesMap', () => {
       db.prepare(`
         INSERT INTO exchange_rates (base_currency, target_currency, rate)

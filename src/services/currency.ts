@@ -88,14 +88,12 @@ export function getExchangeRates(db?: any): Record<string, number> {
       .prepare('SELECT target_currency, rate FROM exchange_rates WHERE base_currency = ?')
       .all('USD') as { target_currency: string; rate: number }[];
 
-    if (!rows || rows.length === 0) {
-      return { ...DEFAULT_FALLBACK_RATES };
-    }
-
-    const rates: Record<string, number> = { USD: 1.0 };
-    for (const row of rows) {
-      if (typeof row.rate === 'number' && !isNaN(row.rate)) {
-        rates[row.target_currency.toUpperCase()] = row.rate;
+    const rates: Record<string, number> = { ...DEFAULT_FALLBACK_RATES, USD: 1.0 };
+    if (rows && rows.length > 0) {
+      for (const row of rows) {
+        if (typeof row.rate === 'number' && !isNaN(row.rate)) {
+          rates[row.target_currency.toUpperCase()] = row.rate;
+        }
       }
     }
     return rates;
@@ -145,16 +143,12 @@ export async function syncExchangeRates(db?: any, force: boolean = false): Promi
 
   // Fetch exchange rates from public API
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
     const response = await fetch(EXCHANGE_RATE_API_URL, {
-      signal: controller.signal,
+      signal: AbortSignal.timeout(10000),
       headers: {
         Accept: 'application/json',
       },
     });
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       throw new Error(`Exchange rate API responded with status ${response.status}`);
