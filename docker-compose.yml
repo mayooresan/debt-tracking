@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  monthly-planner:
+  debt-planner:
     build:
       context: .
       dockerfile: Dockerfile
-    image: monthly-planner:latest
-    container_name: monthly-planner
+    image: debt-planner:latest
+    container_name: debt-planner
     restart: unless-stopped
     volumes:
       - ./data:/app/data
@@ -20,10 +20,10 @@ services:
       - BASE_CURRENCY=${BASE_CURRENCY:-USD}
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.monthly-planner.rule=Host(`debt.jaymayu.com`)"
-      - "traefik.http.routers.monthly-planner.entrypoints=websecure"
-      - "traefik.http.routers.monthly-planner.tls.certresolver=letsencrypt"
-      - "traefik.http.services.monthly-planner.loadbalancer.server.port=3000"
+      - "traefik.http.routers.debt-planner.rule=Host(`debt.jaymayu.com`)"
+      - "traefik.http.routers.debt-planner.entrypoints=websecure"
+      - "traefik.http.routers.debt-planner.tls.certresolver=letsencrypt"
+      - "traefik.http.services.debt-planner.loadbalancer.server.port=3000"
     networks:
       - web
 

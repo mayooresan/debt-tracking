@@ -1,4 +1,4 @@
-# Debt Management Application (`monthly-planner`)
+# Debt Management Application (`debt-planner`)
 
 A modern, self-hosted, single-user debt tracking and monthly obligation management web application. Designed to help individuals regain full control over debts, installment loans, credit card balances, and recurring payments across multiple currencies.
 
@@ -33,7 +33,7 @@ flowchart TD
         Traefik["Traefik Reverse Proxy<br/>(debt.jaymayu.com:443)<br/>letsencrypt certresolver"]
         
         subgraph DockerBridge["Docker Network: web (external)"]
-            AppContainer["monthly-planner Container<br/>(Node.js 20 Express :3000)"]
+            AppContainer["debt-planner Container<br/>(Node.js 20 Express :3000)"]
             subgraph ContainerInternals["Inside Container"]
                 StaticSPA["React Vite SPA Static Distribution<br/>(/client/dist)"]
                 API["Express REST API Routes<br/>(/api/auth, /api/debts, ...)"]
@@ -202,11 +202,11 @@ Once deployed, verify that the application and routing are functional:
    ```bash
    docker compose ps
    ```
-   Output should show `monthly-planner` in state `Up`.
+   Output should show `debt-planner` in state `Up`.
 
 2. **Inspect container logs:**
    ```bash
-   docker compose logs -f monthly-planner
+   docker compose logs -f debt-planner
    ```
    Look for:
    ```text
@@ -216,7 +216,7 @@ Once deployed, verify that the application and routing are functional:
 
 3. **Verify container health internally:**
    ```bash
-   docker exec monthly-planner wget -qO- http://localhost:3000/api/auth/status
+   docker exec debt-planner wget -qO- http://localhost:3000/api/auth/status
    ```
    Expected response: `{"authenticated":false}`
 
@@ -265,7 +265,7 @@ Using SQLite's `.backup` command ensures an atomic, consistent snapshot without 
 sqlite3 ./data/budget.db ".backup ./data/backup-$(date +%Y%m%d%H%M).db"
 
 # Method B: Using docker exec (no host sqlite3 required)
-docker exec monthly-planner node -e "
+docker exec debt-planner node -e "
 const Database = require('better-sqlite3');
 const db = new Database('/app/data/budget.db');
 db.backup('/app/data/backup-$(date +%Y%m%d%H%M).db')
@@ -350,7 +350,7 @@ To restore the database from a backup file:
 
 5. Verify logs and health:
    ```bash
-   docker compose logs -f monthly-planner
+   docker compose logs -f debt-planner
    ```
 
 ---
