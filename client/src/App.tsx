@@ -31,6 +31,7 @@ export const App: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonth());
   const [baseCurrency, setBaseCurrency] = useState<string>('USD');
   const [currencies, setCurrencies] = useState<Currency[]>([]);
+  const [rates, setRates] = useState<Record<string, number>>({});
   const [categories, setCategories] = useState<Category[]>([]);
   const [debts, setDebts] = useState<DebtWithMonthlyStatus[]>([]);
   const [summary, setSummary] = useState<MonthlySummary | null>(null);
@@ -87,9 +88,8 @@ export const App: React.FC = () => {
         if (currenciesData.currencies) {
           setCurrencies(currenciesData.currencies);
         }
-        if (currenciesData.baseCurrency && currenciesData.baseCurrency !== curr) {
-          // If server settings had a different base currency recorded
-          setBaseCurrency(currenciesData.baseCurrency);
+        if (currenciesData.rates) {
+          setRates(currenciesData.rates);
         }
 
         setCategories(categoriesData || []);
@@ -128,7 +128,6 @@ export const App: React.FC = () => {
     } catch {
       // fallback
     }
-    loadDashboardData(selectedMonth, baseCurrency);
   };
 
   const handleLogout = async () => {
@@ -143,16 +142,15 @@ export const App: React.FC = () => {
     }
   };
 
-  // Base Currency Change Handler
+  // Base Currency Change Handler - updates backend setting and state; useEffect handles data load
   const handleBaseCurrencyChange = async (newCurrency: string) => {
     if (newCurrency === baseCurrency) return;
-    setBaseCurrency(newCurrency);
     try {
       await api.updateSettings({ base_currency: newCurrency });
     } catch (err) {
       console.warn('Failed to update base currency setting in backend', err);
     }
-    loadDashboardData(selectedMonth, newCurrency);
+    setBaseCurrency(newCurrency);
   };
 
   // Month Change Handler
@@ -258,11 +256,20 @@ export const App: React.FC = () => {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
-  // Compute baseline total debt for overall payoff calculation
-  const totalBaselineDebt = debts.reduce(
-    (sum, d) => sum + (d.converted_remaining_balance !== undefined ? (d.total_amount / (d.remaining_balance || 1)) * d.converted_remaining_balance : d.total_amount),
-    0
-  );
+  // Compute baseline total debt for overall payoff calculation (preserving paid-off debts)
+  const totalBaselineDebt = debts.reduce((sum, d) => {
+    let rate = 1;
+    if (d.currency.toUpperCase() === baseCurrency.toUpperCase()) {
+      rate = 1;
+    } else if (d.remaining_balance > 0 && d.converted_remaining_balance !== undefined) {
+      rate = d.converted_remaining_balance / d.remaining_balance;
+    } else if (d.monthly_payment > 0 && d.converted_monthly_payment !== undefined) {
+      rate = d.converted_monthly_payment / d.monthly_payment;
+    } else if (rates[baseCurrency] && rates[d.currency]) {
+      rate = rates[baseCurrency] / rates[d.currency];
+    }
+    return sum + d.total_amount * rate;
+  }, 0);
 
   // 3. Authenticated Dashboard
   return (

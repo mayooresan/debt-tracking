@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check, Loader2, AlertCircle } from 'lucide-react';
 import { DebtWithMonthlyStatus, CreatePaymentInput } from '../types';
-import { formatCurrency, formatMonthYear } from '../utils/formatters';
+import { formatCurrency, formatMonthYear, getLocalDateString } from '../utils/formatters';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -28,8 +28,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   useEffect(() => {
     if (!isOpen || !debt) return;
 
-    // Default to today's date YYYY-MM-DD
-    const today = new Date().toISOString().slice(0, 10);
+    // Default to today's local date YYYY-MM-DD
+    const today = getLocalDateString();
     setAmount(debt.monthly_payment ? String(debt.monthly_payment) : '');
     setPaymentDate(today);
     setMonthPeriod(selectedMonth || today.slice(0, 7));
