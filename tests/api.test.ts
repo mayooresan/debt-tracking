@@ -748,6 +748,17 @@ describe('Express REST API & Server Integration Tests', () => {
       expect(codes).toContain('GBP');
     });
 
+    it('GET /api/rates returns exchange rates object', async () => {
+      const res = await request(app)
+        .get('/api/rates')
+        .set('Cookie', cookie);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body).toHaveProperty('rates');
+      expect(res.body.rates.USD).toBe(1.0);
+    });
+
     it('POST /api/rates/sync triggers exchange rate sync', async () => {
       const res = await request(app)
         .post('/api/rates/sync')
@@ -772,23 +783,24 @@ describe('Express REST API & Server Integration Tests', () => {
       const clientDist = path.resolve(process.cwd(), 'client', 'dist');
       const testHtmlFile = path.join(clientDist, 'index.html');
       let createdDir = false;
-      let createdFile = false;
+      const existingContent = fs.existsSync(testHtmlFile)
+        ? fs.readFileSync(testHtmlFile, 'utf-8')
+        : null;
 
       try {
         if (!fs.existsSync(clientDist)) {
           fs.mkdirSync(clientDist, { recursive: true });
           createdDir = true;
         }
-        if (!fs.existsSync(testHtmlFile)) {
-          fs.writeFileSync(testHtmlFile, '<html><body>App Root</body></html>', 'utf-8');
-          createdFile = true;
-        }
+        fs.writeFileSync(testHtmlFile, '<html><body>App Root</body></html>', 'utf-8');
 
         const res = await request(app).get('/dashboard');
         expect(res.status).toBe(200);
         expect(res.text).toContain('App Root');
       } finally {
-        if (createdFile && fs.existsSync(testHtmlFile)) {
+        if (existingContent !== null) {
+          fs.writeFileSync(testHtmlFile, existingContent, 'utf-8');
+        } else if (fs.existsSync(testHtmlFile)) {
           fs.unlinkSync(testHtmlFile);
         }
         if (createdDir && fs.existsSync(clientDist)) {

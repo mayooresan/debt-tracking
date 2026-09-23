@@ -19,6 +19,7 @@ import {
 } from '../services/debt';
 import {
   SUPPORTED_CURRENCIES,
+  getExchangeRates,
   syncExchangeRates,
 } from '../services/currency';
 
@@ -425,6 +426,20 @@ apiRouter.put('/settings', (req: Request, res: Response): void => {
  */
 apiRouter.get('/currencies', (_req: Request, res: Response): void => {
   res.json(SUPPORTED_CURRENCIES);
+});
+
+/**
+ * GET /api/rates
+ * Returns the current exchange rates.
+ */
+apiRouter.get('/rates', (req: Request, res: Response): void => {
+  const db = getDatabase(req);
+  try {
+    const rates = getExchangeRates(db);
+    res.json({ success: true, rates });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to retrieve exchange rates' });
+  }
 });
 
 /**
