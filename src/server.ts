@@ -60,6 +60,11 @@ export function createServer(db?: DatabaseType): Express {
   // Protected REST API routes (requires valid 'debt_session' cookie)
   app.use('/api', authMiddleware, apiRouter);
 
+  // Catch-all 404 handler for unmatched /api/* routes
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: 'Endpoint not found' });
+  });
+
   // Serve static client assets
   const clientDist = getClientDistPath();
   app.use(express.static(clientDist));

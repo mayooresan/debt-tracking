@@ -167,7 +167,12 @@ export function authMiddleware(
     for (const pair of cookiePairs) {
       const [key, ...vals] = pair.trim().split('=');
       if (key === COOKIE_NAME) {
-        token = decodeURIComponent(vals.join('='));
+        const rawVal = vals.join('=');
+        try {
+          token = decodeURIComponent(rawVal);
+        } catch {
+          token = rawVal;
+        }
         break;
       }
     }

@@ -333,5 +333,26 @@ describe('Authentication & Security Service', () => {
       expect(res.json).toHaveBeenCalledWith({ error: 'Unauthorized' });
       expect(next).not.toHaveBeenCalled();
     });
+
+    it('handles malformed percent-encoded cookies (e.g. debt_session=%E0%A4%A) gracefully without throwing', () => {
+      const req: any = {
+        headers: {
+          cookie: `${COOKIE_NAME}=%E0%A4%A`,
+        },
+      };
+      const res: any = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      };
+      const next = vi.fn();
+
+      expect(() => {
+        authMiddleware(req, res, next);
+      }).not.toThrow();
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Unauthorized' });
+      expect(next).not.toHaveBeenCalled();
+    });
   });
 });

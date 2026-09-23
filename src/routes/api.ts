@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { Database as DatabaseType } from 'better-sqlite3';
 import { getDb } from '../db/index';
 import {
-  listCategories,
   createCategory,
   updateCategory,
   deleteCategory,

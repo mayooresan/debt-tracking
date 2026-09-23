@@ -98,6 +98,16 @@ describe('Express REST API & Server Integration Tests', () => {
       expect(res.body.baseCurrency).toBe('USD');
     });
 
+    it('GET /api/auth/status handles malformed percent-encoded cookie gracefully without error', async () => {
+      const res = await request(app)
+        .get('/api/auth/status')
+        .set('Cookie', `${COOKIE_NAME}=%E0%A4%A`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.authenticated).toBe(false);
+      expect(res.body.baseCurrency).toBe('USD');
+    });
+
     it('POST /api/auth/logout clears session cookie and revokes access', async () => {
       const cookie = await getAuthCookie();
 
@@ -822,6 +832,15 @@ describe('Express REST API & Server Integration Tests', () => {
         }
       }
       expect(hitRateLimit).toBe(true);
+    });
+
+    it('returns 404 with JSON error for unmatched /api routes', async () => {
+      const res = await request(app)
+        .get('/api/nonexistent')
+        .set('Cookie', getAuthCookie());
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: 'Endpoint not found' });
     });
   });
 });

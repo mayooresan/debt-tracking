@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import DatabaseConstructor, { Database as DatabaseType } from 'better-sqlite3';
 
+export type { Database } from 'better-sqlite3';
+
 let instance: DatabaseType | null = null;
 let instancePath: string | null = null;
 

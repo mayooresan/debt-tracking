@@ -1,4 +1,4 @@
-import { getDb } from '../db/index';
+import { getDb, Database } from '../db/index';
 
 export interface SupportedCurrency {
   code: string;
@@ -80,7 +80,7 @@ const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
  * Reads cached rates from the SQLite exchange_rates table.
  * If no rates exist in the database, returns default fallback rates.
  */
-export function getExchangeRates(db?: any): Record<string, number> {
+export function getExchangeRates(db?: Database): Record<string, number> {
   const database = db || getDb();
 
   try {
@@ -105,7 +105,7 @@ export function getExchangeRates(db?: any): Record<string, number> {
 /**
  * Retrieves exchange rates as a Map for convenience.
  */
-export function getExchangeRatesMap(db?: any): Map<string, number> {
+export function getExchangeRatesMap(db?: Database): Map<string, number> {
   const rates = getExchangeRates(db);
   return new Map(Object.entries(rates));
 }
@@ -115,7 +115,7 @@ export function getExchangeRatesMap(db?: any): Map<string, number> {
  * Throttles requests: skips if last_rates_sync was within 24 hours unless force === true.
  * In case of any network or API error, seamlessly falls back to cached SQLite rates without throwing.
  */
-export async function syncExchangeRates(db?: any, force: boolean = false): Promise<SyncRatesResult> {
+export async function syncExchangeRates(db?: Database, force: boolean = false): Promise<SyncRatesResult> {
   const database = db || getDb();
 
   // Check last sync timestamp from app_settings

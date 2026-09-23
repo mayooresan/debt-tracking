@@ -128,14 +128,14 @@ EOF
   fi
 
   if [ -n "${USER_PASS}" ]; then
-    ESCAPED_PASS=$(printf '%s\n' "${USER_PASS}" | sed -e 's/[\/&]/\\&/g')
+    ESCAPED_PASS=$(printf '%s\n' "${USER_PASS}" | sed -e 's/[|&\\]/\\&/g')
     sed -i.bak "s|^AUTH_PASSWORD=.*|AUTH_PASSWORD=${ESCAPED_PASS}|" "${ENV_FILE}" && rm -f "${ENV_FILE}.bak"
     success "Configured master password in .env."
   else
     # Auto-generate a secure random password if non-interactive or left blank
     AUTO_PASS=$(openssl rand -base64 16 2>/dev/null || cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$' | head -c 20 || true)
     if [ -n "${AUTO_PASS}" ]; then
-      ESCAPED_AUTO_PASS=$(printf '%s\n' "${AUTO_PASS}" | sed -e 's/[\/&]/\\&/g')
+      ESCAPED_AUTO_PASS=$(printf '%s\n' "${AUTO_PASS}" | sed -e 's/[|&\\]/\\&/g')
       sed -i.bak "s|^AUTH_PASSWORD=.*|AUTH_PASSWORD=${ESCAPED_AUTO_PASS}|" "${ENV_FILE}" && rm -f "${ENV_FILE}.bak"
       warn "Generated random master password: ${AUTO_PASS}"
       warn "You can view or change this password anytime in: ${ENV_FILE}"

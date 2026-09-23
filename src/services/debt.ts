@@ -1,4 +1,4 @@
-import { getDb } from '../db/index';
+import { getDb, Database } from '../db/index';
 import { convertAmount, getExchangeRates } from './currency';
 import {
   Category,
@@ -17,7 +17,7 @@ import {
 /**
  * Retrieves the base currency configured in app_settings or defaults to 'USD'.
  */
-function getBaseCurrencySetting(db: any): string {
+function getBaseCurrencySetting(db: Database): string {
   try {
     const row = db
       .prepare("SELECT value FROM app_settings WHERE key = 'base_currency'")
@@ -35,7 +35,7 @@ function getBaseCurrencySetting(db: any): string {
 /**
  * Lists all categories ordered by ID ascending.
  */
-export function listCategories(db?: any): Category[] {
+export function listCategories(db?: Database): Category[] {
   const database = db || getDb();
   return database.prepare('SELECT * FROM categories ORDER BY id ASC').all() as Category[];
 }
@@ -45,7 +45,7 @@ export function listCategories(db?: any): Category[] {
  * Name is required and must be unique.
  */
 export function createCategory(
-  db: any,
+  db: Database,
   input: { name: string; color?: string; icon?: string }
 ): Category {
   const database = db || getDb();
@@ -72,7 +72,7 @@ export function createCategory(
  * Updates an existing category by ID.
  */
 export function updateCategory(
-  db: any,
+  db: Database,
   id: number,
   input: { name?: string; color?: string; icon?: string }
 ): Category {
@@ -106,7 +106,7 @@ export function updateCategory(
  * Deletes a category if no debts are attached.
  * Throws an error if debts are attached (enforced by foreign key / validation).
  */
-export function deleteCategory(db: any, id: number): boolean {
+export function deleteCategory(db: Database, id: number): boolean {
   const database = db || getDb();
 
   const debtCount = database
@@ -128,7 +128,7 @@ export function deleteCategory(db: any, id: number): boolean {
 /**
  * Retrieves a single debt by ID, or null if not found.
  */
-export function getDebtById(db: any, id: number): Debt | null {
+export function getDebtById(db: Database, id: number): Debt | null {
   const database = db || getDb();
   const debt = database
     .prepare('SELECT * FROM debts WHERE id = ?')
@@ -140,7 +140,7 @@ export function getDebtById(db: any, id: number): Debt | null {
  * Creates a new debt record.
  * Supports snake_case and camelCase input properties.
  */
-export function createDebt(db: any, input: CreateDebtInput): Debt {
+export function createDebt(db: Database, input: CreateDebtInput): Debt {
   const database = db || getDb();
   const raw = input as any;
 
@@ -209,7 +209,7 @@ export function createDebt(db: any, input: CreateDebtInput): Debt {
  * Automatically updates is_active when remaining_balance is updated to 0 or above.
  */
 export function updateDebt(
-  db: any,
+  db: Database,
   id: number,
   input: Partial<CreateDebtInput> & { is_active?: number }
 ): Debt {
@@ -311,7 +311,7 @@ export function updateDebt(
 /**
  * Deletes a debt by ID. Payments are cascaded via SQLite foreign key ON DELETE CASCADE.
  */
-export function deleteDebt(db: any, id: number): boolean {
+export function deleteDebt(db: Database, id: number): boolean {
   const database = db || getDb();
   const result = database.prepare('DELETE FROM debts WHERE id = ?').run(id);
   return result.changes > 0;
@@ -329,7 +329,7 @@ export function deleteDebt(db: any, id: number): boolean {
  * 4. Returns { payment, debt }
  */
 export function recordPayment(
-  db: any,
+  db: Database,
   input: CreatePaymentInput
 ): { payment: Payment; debt: Debt } {
   const database = db || getDb();
@@ -416,7 +416,7 @@ export function recordPayment(
  * 5. Returns { success: true, debt }
  */
 export function revertPayment(
-  db: any,
+  db: Database,
   paymentId: number
 ): { success: boolean; debt: Debt } {
   const database = db || getDb();
@@ -465,7 +465,7 @@ export function revertPayment(
 /**
  * Retrieves payment history for a specific debt.
  */
-export function getPaymentsByDebtId(db: any, debtId: number): Payment[] {
+export function getPaymentsByDebtId(db: Database, debtId: number): Payment[] {
   const database = db || getDb();
   return database
     .prepare(
@@ -477,7 +477,7 @@ export function getPaymentsByDebtId(db: any, debtId: number): Payment[] {
 /**
  * Retrieves all payments recorded for a given calendar month cycle (YYYY-MM).
  */
-export function getPaymentsByMonth(db: any, monthPeriod: string): Payment[] {
+export function getPaymentsByMonth(db: Database, monthPeriod: string): Payment[] {
   const database = db || getDb();
   return database
     .prepare(
@@ -496,7 +496,7 @@ export function getPaymentsByMonth(db: any, monthPeriod: string): Payment[] {
  * to the specified base currency (or defaults to system base_currency).
  */
 export function listDebtsWithMonthlyStatus(
-  db: any,
+  db: Database,
   monthPeriod: string,
   baseCurrency?: string
 ): DebtWithMonthlyStatus[] {
@@ -589,7 +589,7 @@ export function listDebtsWithMonthlyStatus(
  * - category_breakdown: array of category summaries
  */
 export function getMonthlySummary(
-  db: any,
+  db: Database,
   monthPeriod: string,
   baseCurrency?: string
 ): MonthlySummary {
