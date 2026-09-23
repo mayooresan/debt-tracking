@@ -955,4 +955,98 @@ describe('Debt & Payment Core Service', () => {
       expect(summary.percentage_paid).toBeGreaterThanOrEqual(100);
     });
   });
+
+  describe('Installment Months & Payoff Date Calculations', () => {
+    it('should save and return term_months on createDebt and updateDebt', () => {
+      const categories = listCategories(db);
+      const loanCat = categories.find((c) => c.name === 'Loans')!;
+
+      const debt = createDebt(db, {
+        category_id: loanCat.id,
+        name: 'Car Installment',
+        total_amount: 2400,
+        monthly_payment: 200,
+        term_months: 12,
+        currency: 'USD',
+      });
+
+      expect(debt.term_months).toBe(12);
+
+      const updated = updateDebt(db, debt.id, {
+        term_months: 24,
+      });
+      expect(updated.term_months).toBe(24);
+    });
+
+    it('should calculate remaining_months and projected_payoff_date and count down on payment', () => {
+      const categories = listCategories(db);
+      const loanCat = categories.find((c) => c.name === 'Loans')!;
+
+      const debt = createDebt(db, {
+        category_id: loanCat.id,
+        name: 'Laptop Loan',
+        total_amount: 1200,
+        remaining_balance: 1200,
+        monthly_payment: 100,
+        term_months: 12,
+        currency: 'USD',
+      });
+
+      // Before payment in 2026-09:
+      // remaining_balance = 1200, monthly = 100 -> 12 months left.
+      // 12 months starting in Sep 2026 finishes in Aug 2027 (2027-08).
+      const debtsBefore = listDebtsWithMonthlyStatus(db, '2026-09', 'USD');
+      const laptopBefore = debtsBefore.find((d) => d.id === debt.id)!;
+      expect(laptopBefore.is_paid).toBe(false);
+      expect(laptopBefore.remaining_months).toBe(12);
+      expect(laptopBefore.projected_payoff_date).toBe('2027-08');
+
+      // Now record payment for 2026-09
+      recordPayment(db, {
+        debt_id: debt.id,
+        amount: 100,
+        currency: 'USD',
+        payment_date: '2026-09-15',
+        month_period: '2026-09',
+      });
+
+      // After payment: remaining_balance drops to 1100.
+      // remaining_months drops to 11!
+      // projected_payoff_date is still 2027-08 (11 remaining payments starting next month 2026-10 through 2027-08).
+      const debtsAfter = listDebtsWithMonthlyStatus(db, '2026-09', 'USD');
+      const laptopAfter = debtsAfter.find((d) => d.id === debt.id)!;
+      expect(laptopAfter.is_paid).toBe(true);
+      expect(laptopAfter.remaining_balance).toBe(1100);
+      expect(laptopAfter.remaining_months).toBe(11);
+      expect(laptopAfter.projected_payoff_date).toBe('2027-08');
+    });
+
+    it('should return remaining_months 0 and null projected_payoff_date when paid off', () => {
+      const categories = listCategories(db);
+      const loanCat = categories.find((c) => c.name === 'Loans')!;
+
+      const debt = createDebt(db, {
+        category_id: loanCat.id,
+        name: 'Small Fee',
+        total_amount: 100,
+        remaining_balance: 100,
+        monthly_payment: 100,
+        currency: 'USD',
+      });
+
+      recordPayment(db, {
+        debt_id: debt.id,
+        amount: 100,
+        currency: 'USD',
+        payment_date: '2026-09-10',
+        month_period: '2026-09',
+      });
+
+      const debts = listDebtsWithMonthlyStatus(db, '2026-09', 'USD');
+      const smallFee = debts.find((d) => d.id === debt.id)!;
+      expect(smallFee.remaining_balance).toBe(0);
+      expect(smallFee.remaining_months).toBe(0);
+      expect(smallFee.projected_payoff_date).toBeNull();
+    });
+  });
 });

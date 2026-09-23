@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS debts (
   currency TEXT NOT NULL DEFAULT 'USD',
   due_day INTEGER NOT NULL DEFAULT 1,
   interest_rate REAL DEFAULT 0.0,
+  term_months INTEGER,
   notes TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -121,6 +122,17 @@ export function initDb(dbPath?: string): DatabaseType {
   db.pragma('journal_mode = WAL');
 
   db.exec(SCHEMA_SQL);
+
+  // Automatic column migration for existing databases
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(debts)").all() as Array<{ name: string }>;
+    const hasTermMonths = tableInfo.some((col) => col.name === 'term_months');
+    if (!hasTermMonths && tableInfo.length > 0) {
+      db.prepare("ALTER TABLE debts ADD COLUMN term_months INTEGER").run();
+    }
+  } catch {
+    // Ignore migration error if table does not exist yet
+  }
 
   instance = db;
   instancePath = resolvedPath;

@@ -153,6 +153,7 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
   const currency = (raw.currency || 'USD').trim().toUpperCase();
   const due_day = raw.due_day ?? raw.dueDay ?? 1;
   const interest_rate = raw.interest_rate ?? raw.interestRate ?? 0.0;
+  const term_months = raw.term_months ?? raw.termMonths ?? null;
   const notes = raw.notes ?? null;
 
   if (!name) {
@@ -176,14 +177,19 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
   if (typeof due_day !== 'number' || !Number.isInteger(due_day) || due_day < 1 || due_day > 31) {
     throw new Error('due_day must be an integer between 1 and 31');
   }
+  if (term_months !== null && term_months !== undefined) {
+    if (typeof term_months !== 'number' || !Number.isInteger(term_months) || term_months <= 0) {
+      throw new Error('term_months must be a positive integer');
+    }
+  }
 
   const is_active = remaining_balance <= 0 ? 0 : 1;
 
   const stmt = database.prepare(`
     INSERT INTO debts (
       category_id, name, total_amount, remaining_balance, monthly_payment,
-      currency, due_day, interest_rate, notes, is_active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      currency, due_day, interest_rate, term_months, notes, is_active
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
@@ -195,6 +201,7 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
     currency,
     due_day,
     interest_rate,
+    term_months,
     notes,
     is_active
   );
@@ -235,6 +242,12 @@ export function updateDebt(
   const due_day = raw.due_day ?? raw.dueDay ?? existing.due_day;
   const interest_rate =
     raw.interest_rate ?? raw.interestRate ?? existing.interest_rate;
+  const term_months =
+    raw.term_months !== undefined
+      ? raw.term_months
+      : raw.termMonths !== undefined
+      ? raw.termMonths
+      : existing.term_months;
   const notes = raw.notes !== undefined ? raw.notes : existing.notes;
 
   let remaining_balance =
@@ -266,6 +279,11 @@ export function updateDebt(
       throw new Error('due_day must be an integer between 1 and 31');
     }
   }
+  if (term_months !== null && term_months !== undefined) {
+    if (typeof term_months !== 'number' || !Number.isInteger(term_months) || term_months <= 0) {
+      throw new Error('term_months must be a positive integer');
+    }
+  }
 
   if (is_active === undefined) {
     if (raw.remaining_balance !== undefined || raw.remainingBalance !== undefined) {
@@ -285,6 +303,7 @@ export function updateDebt(
       currency = ?,
       due_day = ?,
       interest_rate = ?,
+      term_months = ?,
       notes = ?,
       is_active = ?,
       updated_at = CURRENT_TIMESTAMP
@@ -298,6 +317,7 @@ export function updateDebt(
     currency,
     due_day,
     interest_rate,
+    term_months,
     notes,
     is_active,
     id
@@ -552,6 +572,28 @@ export function listDebtsWithMonthlyStatus(
       rates
     );
 
+    const remaining_months =
+      row.remaining_balance > 0 && row.monthly_payment > 0
+        ? Math.ceil(row.remaining_balance / row.monthly_payment)
+        : 0;
+
+    let projected_payoff_date: string | null = null;
+    if (remaining_months > 0) {
+      const [yearStr, monthStr] = monthPeriod.split('-');
+      let year = parseInt(yearStr, 10);
+      let month = parseInt(monthStr, 10);
+      if (isNaN(year) || isNaN(month)) {
+        const now = new Date();
+        year = now.getFullYear();
+        month = now.getMonth() + 1;
+      }
+      const startOffset = is_paid ? 1 : 0;
+      const totalMonths = year * 12 + (month - 1) + startOffset + (remaining_months - 1);
+      const targetYear = Math.floor(totalMonths / 12);
+      const targetMonth = (totalMonths % 12) + 1;
+      projected_payoff_date = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
+    }
+
     return {
       id: row.id,
       category_id: row.category_id,
@@ -562,6 +604,7 @@ export function listDebtsWithMonthlyStatus(
       currency: row.currency,
       due_day: row.due_day,
       interest_rate: row.interest_rate,
+      term_months: row.term_months ?? null,
       notes: row.notes,
       is_active: row.is_active,
       created_at: row.created_at,
@@ -573,6 +616,8 @@ export function listDebtsWithMonthlyStatus(
       paid_amount,
       paid_at,
       payment_id,
+      remaining_months,
+      projected_payoff_date,
       converted_monthly_payment,
       converted_remaining_balance,
     };

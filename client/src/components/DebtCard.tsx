@@ -9,12 +9,14 @@ import {
   FileText,
   CheckCircle2,
   Loader2,
+  Clock,
 } from 'lucide-react';
 import { DebtWithMonthlyStatus } from '../types';
 import {
   formatCurrency,
   formatOrdinalDay,
   formatDate,
+  formatMonthYear,
   getCategoryIcon,
 } from '../utils/formatters';
 
@@ -195,6 +197,21 @@ export const DebtCard: React.FC<DebtCardProps> = ({
               <span className="font-semibold text-emerald-600">Fully Paid!</span>
             )}
           </div>
+
+          {/* Installment Countdown & Projected Payoff Date */}
+          {debt.remaining_balance > 0 && debt.remaining_months > 0 && (
+            <div className="pt-2.5 mt-1 border-t border-gray-100 flex items-center justify-between text-[11px]">
+              <span className="inline-flex items-center gap-1 font-semibold text-indigo-700 bg-indigo-50/90 px-2 py-0.5 rounded-md border border-indigo-100">
+                <Clock className="w-3 h-3 text-indigo-600" />
+                <span>{debt.remaining_months} {debt.remaining_months === 1 ? 'month' : 'months'} left</span>
+              </span>
+              {debt.projected_payoff_date && (
+                <span className="text-gray-500 font-medium">
+                  Payoff: <strong className="text-gray-700 font-semibold">{formatMonthYear(debt.projected_payoff_date)}</strong>
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Notes, if present */}
