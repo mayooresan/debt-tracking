@@ -18,6 +18,7 @@ interface DebtModalProps {
   currencies: Currency[];
   baseCurrency: string;
   defaultCategoryId?: number;
+  selectedMonth?: string;
 }
 
 export const DebtModal: React.FC<DebtModalProps> = ({
@@ -29,12 +30,14 @@ export const DebtModal: React.FC<DebtModalProps> = ({
   currencies,
   baseCurrency,
   defaultCategoryId,
+  selectedMonth,
 }) => {
   const isEditing = Boolean(debt);
 
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState<number>(1);
   const [currency, setCurrency] = useState('USD');
+  const [startMonth, setStartMonth] = useState<string>('');
   const [totalAmount, setTotalAmount] = useState<string>('');
   const [remainingBalance, setRemainingBalance] = useState<string>('');
   const [monthlyPayment, setMonthlyPayment] = useState<string>('');
@@ -54,6 +57,9 @@ export const DebtModal: React.FC<DebtModalProps> = ({
       setName(debt.name);
       setCategoryId(debt.category_id);
       setCurrency(debt.currency || baseCurrency || 'USD');
+      setStartMonth(
+        debt.start_month || debt.startMonth || selectedMonth || new Date().toISOString().slice(0, 7)
+      );
       setTotalAmount(debt.total_amount ? String(debt.total_amount) : '');
       setRemainingBalance(
         debt.remaining_balance !== undefined ? String(debt.remaining_balance) : ''
@@ -77,6 +83,7 @@ export const DebtModal: React.FC<DebtModalProps> = ({
       setName('');
       setCategoryId(defaultCategoryId || (categories[0] ? categories[0].id : 1));
       setCurrency(baseCurrency || 'USD');
+      setStartMonth(selectedMonth || new Date().toISOString().slice(0, 7));
       setTotalAmount('');
       setRemainingBalance('');
       setMonthlyPayment('');
@@ -86,7 +93,7 @@ export const DebtModal: React.FC<DebtModalProps> = ({
       setNotes('');
     }
     setError(null);
-  }, [isOpen, debt, categories, baseCurrency, defaultCategoryId]);
+  }, [isOpen, debt, categories, baseCurrency, defaultCategoryId, selectedMonth]);
 
   if (!isOpen) return null;
 
@@ -144,8 +151,15 @@ export const DebtModal: React.FC<DebtModalProps> = ({
 
     if (!monthsCount || monthsCount <= 0 || isNaN(monthsCount)) return null;
 
-    const now = new Date();
-    const totalMonths = now.getFullYear() * 12 + now.getMonth() + (monthsCount - 1);
+    const [sYearStr, sMonthStr] = (startMonth || '').split('-');
+    let sYear = parseInt(sYearStr, 10);
+    let sMonth = parseInt(sMonthStr, 10);
+    if (isNaN(sYear) || isNaN(sMonth)) {
+      const now = new Date();
+      sYear = now.getFullYear();
+      sMonth = now.getMonth() + 1;
+    }
+    const totalMonths = sYear * 12 + (sMonth - 1) + (monthsCount - 1);
     const targetYear = Math.floor(totalMonths / 12);
     const targetMonth = (totalMonths % 12) + 1;
     const targetPeriod = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
@@ -174,9 +188,15 @@ export const DebtModal: React.FC<DebtModalProps> = ({
     const parsedDueDay = parseInt(String(dueDay), 10);
     const parsedInterest = interestRate ? parseFloat(interestRate) : undefined;
     const parsedTermMonths = termMonths ? parseInt(termMonths, 10) : undefined;
+    const trimmedStartMonth = startMonth.trim();
 
     if (!name.trim()) {
       setError('Please provide a name for this debt');
+      return;
+    }
+
+    if (!trimmedStartMonth || !/^\d{4}-\d{2}$/.test(trimmedStartMonth)) {
+      setError('Please provide a valid start month (YYYY-MM)');
       return;
     }
 
@@ -223,6 +243,7 @@ export const DebtModal: React.FC<DebtModalProps> = ({
           due_day: parsedDueDay,
           interest_rate: parsedInterest !== undefined ? parsedInterest : undefined,
           term_months: parsedTermMonths,
+          start_month: trimmedStartMonth,
           notes: notes.trim() || undefined,
         };
         await onSave(updateData);
@@ -237,6 +258,7 @@ export const DebtModal: React.FC<DebtModalProps> = ({
           due_day: parsedDueDay,
           interest_rate: parsedInterest !== undefined ? parsedInterest : undefined,
           term_months: parsedTermMonths,
+          start_month: trimmedStartMonth,
           notes: notes.trim() || undefined,
         };
         await onSave(createData);
@@ -323,7 +345,20 @@ export const DebtModal: React.FC<DebtModalProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Start Month *
+                </label>
+                <input
+                  type="month"
+                  required
+                  value={startMonth}
+                  onChange={(e) => setStartMonth(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                />
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">
                   Currency *
@@ -344,7 +379,9 @@ export const DebtModal: React.FC<DebtModalProps> = ({
                   )}
                 </select>
               </div>
+            </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">
                   Monthly Payment *

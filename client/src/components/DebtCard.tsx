@@ -102,6 +102,13 @@ export const DebtCard: React.FC<DebtCardProps> = ({
                     <span>{debt.interest_rate}% APR</span>
                   </span>
                 )}
+
+              {debt.is_upcoming && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/60">
+                  <Clock className="w-2.5 h-2.5 text-amber-500" />
+                  <span>Starts {formatMonthYear(debt.start_month || '')}</span>
+                </span>
+              )}
             </div>
 
             <h3 className="text-base font-bold text-gray-900 truncate tracking-tight" title={debt.name}>
@@ -252,6 +259,23 @@ export const DebtCard: React.FC<DebtCardProps> = ({
                 <RotateCcw className="w-3 h-3" />
               )}
               <span>Undo</span>
+            </button>
+          </>
+        ) : debt.is_upcoming ? (
+          <>
+            <div className="text-xs text-amber-700 font-medium flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-amber-500" />
+              <span>Starts {formatMonthYear(debt.start_month || '')} • Not Due Yet</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onMarkPaid(debt)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl border border-gray-200 hover:border-emerald-200 transition"
+              title="Pay installment early"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Pay Early</span>
             </button>
           </>
         ) : (

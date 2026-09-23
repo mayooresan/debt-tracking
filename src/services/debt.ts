@@ -156,6 +156,14 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
   const term_months = raw.term_months ?? raw.termMonths ?? null;
   const notes = raw.notes ?? null;
 
+  let start_month = (raw.start_month ?? raw.startMonth ?? '').trim();
+  if (!start_month) {
+    const now = new Date();
+    start_month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  } else if (!/^\d{4}-\d{2}$/.test(start_month)) {
+    throw new Error('start_month must be in YYYY-MM format');
+  }
+
   if (!name) {
     throw new Error('Debt name is required');
   }
@@ -188,8 +196,8 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
   const stmt = database.prepare(`
     INSERT INTO debts (
       category_id, name, total_amount, remaining_balance, monthly_payment,
-      currency, due_day, interest_rate, term_months, notes, is_active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      currency, due_day, interest_rate, term_months, start_month, notes, is_active
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
@@ -202,6 +210,7 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
     due_day,
     interest_rate,
     term_months,
+    start_month,
     notes,
     is_active
   );
@@ -249,6 +258,15 @@ export function updateDebt(
       ? raw.termMonths
       : existing.term_months;
   const notes = raw.notes !== undefined ? raw.notes : existing.notes;
+
+  let start_month = existing.start_month;
+  if (raw.start_month !== undefined || raw.startMonth !== undefined) {
+    const val = (raw.start_month ?? raw.startMonth ?? '').trim();
+    if (!/^\d{4}-\d{2}$/.test(val)) {
+      throw new Error('start_month must be in YYYY-MM format');
+    }
+    start_month = val;
+  }
 
   let remaining_balance =
     raw.remaining_balance ?? raw.remainingBalance ?? existing.remaining_balance;
@@ -304,6 +322,7 @@ export function updateDebt(
       due_day = ?,
       interest_rate = ?,
       term_months = ?,
+      start_month = ?,
       notes = ?,
       is_active = ?,
       updated_at = CURRENT_TIMESTAMP
@@ -318,6 +337,7 @@ export function updateDebt(
     due_day,
     interest_rate,
     term_months,
+    start_month,
     notes,
     is_active,
     id
@@ -559,6 +579,9 @@ export function listDebtsWithMonthlyStatus(
     const paid_at = row.paid_at || null;
     const payment_id = row.payment_id || null;
 
+    const start_month = row.start_month || monthPeriod;
+    const is_upcoming = Boolean(row.start_month && row.start_month > monthPeriod && !is_paid);
+
     const converted_monthly_payment = convertAmount(
       row.monthly_payment,
       row.currency,
@@ -579,7 +602,14 @@ export function listDebtsWithMonthlyStatus(
 
     let projected_payoff_date: string | null = null;
     if (remaining_months > 0) {
-      const [yearStr, monthStr] = monthPeriod.split('-');
+      let basePeriod = monthPeriod;
+      let startOffset = is_paid ? 1 : 0;
+      if (is_upcoming) {
+        basePeriod = start_month;
+        startOffset = 0;
+      }
+
+      const [yearStr, monthStr] = basePeriod.split('-');
       let year = parseInt(yearStr, 10);
       let month = parseInt(monthStr, 10);
       if (isNaN(year) || isNaN(month)) {
@@ -587,7 +617,6 @@ export function listDebtsWithMonthlyStatus(
         year = now.getFullYear();
         month = now.getMonth() + 1;
       }
-      const startOffset = is_paid ? 1 : 0;
       const totalMonths = year * 12 + (month - 1) + startOffset + (remaining_months - 1);
       const targetYear = Math.floor(totalMonths / 12);
       const targetMonth = (totalMonths % 12) + 1;
@@ -605,6 +634,7 @@ export function listDebtsWithMonthlyStatus(
       due_day: row.due_day,
       interest_rate: row.interest_rate,
       term_months: row.term_months ?? null,
+      start_month,
       notes: row.notes,
       is_active: row.is_active,
       created_at: row.created_at,
@@ -613,6 +643,7 @@ export function listDebtsWithMonthlyStatus(
       category_color: row.category_color,
       category_icon: row.category_icon,
       is_paid,
+      is_upcoming,
       paid_amount,
       paid_at,
       payment_id,
@@ -646,23 +677,28 @@ export function getMonthlySummary(
     'USD'
   ).trim().toUpperCase();
 
-  // 1. Total Debt: sum of all debts with remaining_balance > 0
+  // 1. Total Debt: sum of all debts with remaining_balance > 0 where start_month <= monthPeriod or paid in monthPeriod
   const allDebtsWithBalance = database
-    .prepare('SELECT category_id, remaining_balance, currency FROM debts WHERE remaining_balance > 0')
-    .all() as { category_id: number; remaining_balance: number; currency: string }[];
+    .prepare(`
+      SELECT category_id, remaining_balance, currency 
+      FROM debts 
+      WHERE remaining_balance > 0 
+        AND (start_month <= ? OR id IN (SELECT debt_id FROM payments WHERE month_period = ?))
+    `)
+    .all(monthPeriod, monthPeriod) as { category_id: number; remaining_balance: number; currency: string }[];
 
   let totalDebt = 0;
   for (const debt of allDebtsWithBalance) {
     totalDebt += convertAmount(debt.remaining_balance, debt.currency, targetBaseCurrency, rates);
   }
 
-  // 2. Monthly Obligations: sum of monthly_payment for active debts OR debts paid this month
+  // 2. Monthly Obligations: sum of monthly_payment for active debts whose start_month <= monthPeriod OR debts paid this month
   const obligationsDebts = database.prepare(`
     SELECT DISTINCT d.id, d.monthly_payment, d.currency, d.category_id
     FROM debts d
     LEFT JOIN payments p ON d.id = p.debt_id AND p.month_period = ?
-    WHERE d.is_active = 1 OR p.id IS NOT NULL
-  `).all(monthPeriod) as { id: number; monthly_payment: number; currency: string; category_id: number }[];
+    WHERE (d.is_active = 1 AND d.start_month <= ?) OR p.id IS NOT NULL
+  `).all(monthPeriod, monthPeriod) as { id: number; monthly_payment: number; currency: string; category_id: number }[];
 
   let monthlyObligations = 0;
   for (const debt of obligationsDebts) {

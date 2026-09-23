@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS debts (
   due_day INTEGER NOT NULL DEFAULT 1,
   interest_rate REAL DEFAULT 0.0,
   term_months INTEGER,
+  start_month TEXT NOT NULL DEFAULT (strftime('%Y-%m', 'now')),
   notes TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -129,6 +130,10 @@ export function initDb(dbPath?: string): DatabaseType {
     const hasTermMonths = tableInfo.some((col) => col.name === 'term_months');
     if (!hasTermMonths && tableInfo.length > 0) {
       db.prepare("ALTER TABLE debts ADD COLUMN term_months INTEGER").run();
+    }
+    const hasStartMonth = tableInfo.some((col) => col.name === 'start_month');
+    if (!hasStartMonth && tableInfo.length > 0) {
+      db.prepare("ALTER TABLE debts ADD COLUMN start_month TEXT NOT NULL DEFAULT (strftime('%Y-%m', 'now'))").run();
     }
   } catch {
     // Ignore migration error if table does not exist yet

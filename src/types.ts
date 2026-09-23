@@ -29,6 +29,7 @@ export interface Debt {
   due_day: number;
   interest_rate: number | null;
   term_months: number | null;
+  start_month: string;
   notes: string | null;
   is_active: number;
   created_at: string;
@@ -45,6 +46,8 @@ export interface CreateDebtInput {
   due_day?: number;
   interest_rate?: number;
   term_months?: number;
+  start_month?: string;
+  startMonth?: string;
   notes?: string;
 }
 
@@ -58,6 +61,8 @@ export interface UpdateDebtInput {
   due_day?: number;
   interest_rate?: number;
   term_months?: number;
+  start_month?: string;
+  startMonth?: string;
   notes?: string;
   is_active?: number;
 }
@@ -67,6 +72,7 @@ export interface DebtWithMonthlyStatus extends Debt {
   category_color?: string;
   category_icon?: string | null;
   is_paid: boolean;
+  is_upcoming: boolean;
   paid_amount: number;
   paid_at: string | null;
   payment_id: number | null;

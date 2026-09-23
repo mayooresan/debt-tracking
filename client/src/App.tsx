@@ -345,6 +345,7 @@ export const App: React.FC = () => {
         currencies={currencies}
         baseCurrency={baseCurrency}
         defaultCategoryId={defaultCategoryForNewDebt}
+        selectedMonth={selectedMonth}
       />
 
       <PaymentModal

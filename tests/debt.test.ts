@@ -1049,4 +1049,89 @@ describe('Debt & Payment Core Service', () => {
       expect(smallFee.projected_payoff_date).toBeNull();
     });
   });
+
+  describe('Start Month & Future/Past Planning', () => {
+    it('should save and update start_month', () => {
+      const categories = listCategories(db);
+      const cat = categories[0];
+
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Future Course',
+        total_amount: 600,
+        monthly_payment: 100,
+        term_months: 6,
+        start_month: '2026-11',
+      });
+
+      expect(debt.start_month).toBe('2026-11');
+
+      const updated = updateDebt(db, debt.id, {
+        start_month: '2026-12',
+      });
+      expect(updated.start_month).toBe('2026-12');
+    });
+
+    it('should calculate projected payoff date starting from start_month and mark upcoming before start', () => {
+      const categories = listCategories(db);
+      const cat = categories[0];
+
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Future Appliance',
+        total_amount: 1200,
+        monthly_payment: 100,
+        term_months: 12,
+        start_month: '2026-11',
+      });
+
+      // Queried at September 2026 (prior to start_month 2026-11):
+      const debtsSep = listDebtsWithMonthlyStatus(db, '2026-09', 'USD');
+      const applianceSep = debtsSep.find((d) => d.id === debt.id)!;
+      expect(applianceSep.is_upcoming).toBe(true);
+      expect(applianceSep.start_month).toBe('2026-11');
+      // Starts Nov 2026, 12 months -> finishes Oct 2027 (2027-10)
+      expect(applianceSep.projected_payoff_date).toBe('2027-10');
+
+      // Queried at November 2026 (start_month):
+      const debtsNov = listDebtsWithMonthlyStatus(db, '2026-11', 'USD');
+      const applianceNov = debtsNov.find((d) => d.id === debt.id)!;
+      expect(applianceNov.is_upcoming).toBe(false);
+      expect(applianceNov.is_paid).toBe(false);
+      expect(applianceNov.projected_payoff_date).toBe('2027-10');
+      expect(applianceNov.remaining_months).toBe(12);
+    });
+
+    it('should exclude future debts from monthly obligations before start_month', () => {
+      const categories = listCategories(db);
+      const cat = categories[0];
+
+      createDebt(db, {
+        category_id: cat.id,
+        name: 'Current Debt',
+        total_amount: 500,
+        monthly_payment: 100,
+        start_month: '2026-09',
+      });
+
+      createDebt(db, {
+        category_id: cat.id,
+        name: 'Future Debt',
+        total_amount: 1000,
+        monthly_payment: 250,
+        start_month: '2026-11',
+      });
+
+      // For 2026-09, only Current Debt (100) is due, Future Debt (250) has not started
+      const summarySep = getMonthlySummary(db, '2026-09', 'USD');
+      expect(summarySep.monthly_obligations).toBe(100);
+      expect(summarySep.pending_this_month).toBe(100);
+
+      // For 2026-11, both debts are active and due: 100 + 250 = 350
+      const summaryNov = getMonthlySummary(db, '2026-11', 'USD');
+      expect(summaryNov.monthly_obligations).toBe(350);
+      expect(summaryNov.pending_this_month).toBe(350);
+    });
+  });
 });
+
