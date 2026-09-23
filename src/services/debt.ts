@@ -162,10 +162,19 @@ export function createDebt(db: any, input: CreateDebtInput): Debt {
     throw new Error('Category ID is required');
   }
   if (typeof total_amount !== 'number' || isNaN(total_amount) || total_amount < 0) {
-    throw new Error('total_amount must be positive');
+    throw new Error('total_amount must be a non-negative number');
+  }
+  if (typeof remaining_balance !== 'number' || isNaN(remaining_balance) || remaining_balance < 0) {
+    throw new Error('remaining_balance must be a non-negative number');
   }
   if (typeof monthly_payment !== 'number' || isNaN(monthly_payment) || monthly_payment < 0) {
-    throw new Error('monthly_payment must be positive');
+    throw new Error('monthly_payment must be a non-negative number');
+  }
+  if (typeof interest_rate !== 'number' || isNaN(interest_rate) || interest_rate < 0) {
+    throw new Error('interest_rate must be a non-negative number');
+  }
+  if (typeof due_day !== 'number' || !Number.isInteger(due_day) || due_day < 1 || due_day > 31) {
+    throw new Error('due_day must be an integer between 1 and 31');
   }
 
   const is_active = remaining_balance <= 0 ? 0 : 1;
@@ -231,6 +240,32 @@ export function updateDebt(
   let remaining_balance =
     raw.remaining_balance ?? raw.remainingBalance ?? existing.remaining_balance;
   let is_active = raw.is_active ?? raw.isActive;
+
+  if (raw.total_amount !== undefined || raw.totalAmount !== undefined) {
+    if (typeof total_amount !== 'number' || isNaN(total_amount) || total_amount < 0) {
+      throw new Error('total_amount must be a non-negative number');
+    }
+  }
+  if (raw.remaining_balance !== undefined || raw.remainingBalance !== undefined) {
+    if (typeof remaining_balance !== 'number' || isNaN(remaining_balance) || remaining_balance < 0) {
+      throw new Error('remaining_balance must be a non-negative number');
+    }
+  }
+  if (raw.monthly_payment !== undefined || raw.monthlyPayment !== undefined) {
+    if (typeof monthly_payment !== 'number' || isNaN(monthly_payment) || monthly_payment < 0) {
+      throw new Error('monthly_payment must be a non-negative number');
+    }
+  }
+  if (raw.interest_rate !== undefined || raw.interestRate !== undefined) {
+    if (typeof interest_rate !== 'number' || isNaN(interest_rate) || interest_rate < 0) {
+      throw new Error('interest_rate must be a non-negative number');
+    }
+  }
+  if (raw.due_day !== undefined || raw.dueDay !== undefined) {
+    if (typeof due_day !== 'number' || !Number.isInteger(due_day) || due_day < 1 || due_day > 31) {
+      throw new Error('due_day must be an integer between 1 and 31');
+    }
+  }
 
   if (is_active === undefined) {
     if (raw.remaining_balance !== undefined || raw.remainingBalance !== undefined) {
@@ -319,17 +354,17 @@ export function recordPayment(
     throw new Error('month_period is required');
   }
 
-  const existingDebt = database
-    .prepare('SELECT * FROM debts WHERE id = ?')
-    .get(debtId) as Debt | undefined;
-
-  if (!existingDebt) {
-    throw new Error('Debt not found');
-  }
-
-  const currency = (raw.currency || existingDebt.currency || 'USD').trim().toUpperCase();
-
   const recordTx = database.transaction(() => {
+    const existingDebt = database
+      .prepare('SELECT * FROM debts WHERE id = ?')
+      .get(debtId) as Debt | undefined;
+
+    if (!existingDebt) {
+      throw new Error('Debt not found');
+    }
+
+    const currency = (raw.currency || existingDebt.currency || 'USD').trim().toUpperCase();
+
     const insertStmt = database.prepare(`
       INSERT INTO payments (debt_id, amount, currency, payment_date, month_period, notes)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -374,7 +409,7 @@ export function recordPayment(
 
 /**
  * Reverts a previously recorded payment inside an atomic SQLite transaction:
- * 1. Fetches payment by ID
+ * 1. Fetches payment by ID inside transaction
  * 2. Restores remaining_balance on debt: remaining_balance + payment.amount
  * 3. If remaining_balance > 0, reactivates debt (is_active = 1)
  * 4. Deletes payment row
@@ -386,23 +421,23 @@ export function revertPayment(
 ): { success: boolean; debt: Debt } {
   const database = db || getDb();
 
-  const payment = database
-    .prepare('SELECT * FROM payments WHERE id = ?')
-    .get(paymentId) as Payment | undefined;
-
-  if (!payment) {
-    throw new Error('Payment not found');
-  }
-
-  const existingDebt = database
-    .prepare('SELECT * FROM debts WHERE id = ?')
-    .get(payment.debt_id) as Debt | undefined;
-
-  if (!existingDebt) {
-    throw new Error('Debt not found');
-  }
-
   const revertTx = database.transaction(() => {
+    const payment = database
+      .prepare('SELECT * FROM payments WHERE id = ?')
+      .get(paymentId) as Payment | undefined;
+
+    if (!payment) {
+      throw new Error('Payment not found');
+    }
+
+    const existingDebt = database
+      .prepare('SELECT * FROM debts WHERE id = ?')
+      .get(payment.debt_id) as Debt | undefined;
+
+    if (!existingDebt) {
+      throw new Error('Debt not found');
+    }
+
     const restoredBalance =
       Math.round((existingDebt.remaining_balance + payment.amount) * 100) / 100;
     const newIsActive = restoredBalance > 0 ? 1 : existingDebt.is_active;
@@ -568,8 +603,8 @@ export function getMonthlySummary(
 
   // 1. Total Debt: sum of all debts with remaining_balance > 0
   const allDebtsWithBalance = database
-    .prepare('SELECT remaining_balance, currency FROM debts WHERE remaining_balance > 0')
-    .all() as { remaining_balance: number; currency: string }[];
+    .prepare('SELECT category_id, remaining_balance, currency FROM debts WHERE remaining_balance > 0')
+    .all() as { category_id: number; remaining_balance: number; currency: string }[];
 
   let totalDebt = 0;
   for (const debt of allDebtsWithBalance) {
@@ -635,12 +670,8 @@ export function getMonthlySummary(
       catTotalPaid += convertAmount(payment.amount, payment.currency, targetBaseCurrency, rates);
     }
 
-    // Remaining balance for debts in this category
-    const catBalanceDebts = database.prepare(`
-      SELECT remaining_balance, currency
-      FROM debts
-      WHERE category_id = ? AND remaining_balance > 0
-    `).all(category.id) as { remaining_balance: number; currency: string }[];
+    // Remaining balance for debts in this category (aggregated in-memory, no N+1 query)
+    const catBalanceDebts = allDebtsWithBalance.filter((d) => d.category_id === category.id);
 
     let catRemainingBalance = 0;
     for (const debt of catBalanceDebts) {

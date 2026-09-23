@@ -233,7 +233,67 @@ describe('Debt & Payment Core Service', () => {
           total_amount: -500,
           monthly_payment: 100,
         })
-      ).toThrow(/total_amount must be positive/i);
+      ).toThrow(/total_amount must be a non-negative number/i);
+
+      expect(() =>
+        createDebt(db, {
+          category_id: loanCategoryId,
+          name: 'Negative Balance',
+          total_amount: 500,
+          remaining_balance: -10,
+          monthly_payment: 100,
+        })
+      ).toThrow(/remaining_balance must be a non-negative number/i);
+
+      expect(() =>
+        createDebt(db, {
+          category_id: loanCategoryId,
+          name: 'Negative Payment',
+          total_amount: 500,
+          monthly_payment: -50,
+        })
+      ).toThrow(/monthly_payment must be a non-negative number/i);
+
+      expect(() =>
+        createDebt(db, {
+          category_id: loanCategoryId,
+          name: 'Negative Interest',
+          total_amount: 500,
+          monthly_payment: 50,
+          interest_rate: -1,
+        })
+      ).toThrow(/interest_rate must be a non-negative number/i);
+
+      // due_day validations (1 - 31 integers)
+      expect(() =>
+        createDebt(db, {
+          category_id: loanCategoryId,
+          name: 'Due Day 0',
+          total_amount: 500,
+          monthly_payment: 50,
+          due_day: 0,
+        })
+      ).toThrow(/due_day must be an integer between 1 and 31/i);
+
+      expect(() =>
+        createDebt(db, {
+          category_id: loanCategoryId,
+          name: 'Due Day 32',
+          total_amount: 500,
+          monthly_payment: 50,
+          due_day: 32,
+        })
+      ).toThrow(/due_day must be an integer between 1 and 31/i);
+
+      expect(() =>
+        createDebt(db, {
+          category_id: loanCategoryId,
+          name: 'Due Day Fractional',
+          total_amount: 500,
+          monthly_payment: 50,
+          due_day: 15.5,
+        })
+      ).toThrow(/due_day must be an integer between 1 and 31/i);
     });
 
     it('should fetch debt by id', () => {
@@ -287,6 +347,43 @@ describe('Debt & Payment Core Service', () => {
 
     it('should throw when updating a non-existent debt', () => {
       expect(() => updateDebt(db, 99999, { name: 'Ghost' })).toThrow(/not found/i);
+    });
+
+    it('should validate numeric constraints and due_day in updateDebt', () => {
+      const debt = createDebt(db, {
+        category_id: loanCategoryId,
+        name: 'Validation Debt',
+        total_amount: 1000,
+        monthly_payment: 100,
+      });
+
+      expect(() =>
+        updateDebt(db, debt.id, { total_amount: -10 })
+      ).toThrow(/total_amount must be a non-negative number/i);
+
+      expect(() =>
+        updateDebt(db, debt.id, { remaining_balance: -5 })
+      ).toThrow(/remaining_balance must be a non-negative number/i);
+
+      expect(() =>
+        updateDebt(db, debt.id, { monthly_payment: -50 })
+      ).toThrow(/monthly_payment must be a non-negative number/i);
+
+      expect(() =>
+        updateDebt(db, debt.id, { interest_rate: -2 })
+      ).toThrow(/interest_rate must be a non-negative number/i);
+
+      expect(() =>
+        updateDebt(db, debt.id, { due_day: 0 })
+      ).toThrow(/due_day must be an integer between 1 and 31/i);
+
+      expect(() =>
+        updateDebt(db, debt.id, { due_day: 32 })
+      ).toThrow(/due_day must be an integer between 1 and 31/i);
+
+      expect(() =>
+        updateDebt(db, debt.id, { due_day: 15.5 })
+      ).toThrow(/due_day must be an integer between 1 and 31/i);
     });
 
     it('should delete debt and cascade delete associated payments', () => {
@@ -485,6 +582,69 @@ describe('Debt & Payment Core Service', () => {
 
     it('should throw when reverting a non-existent payment', () => {
       expect(() => revertPayment(db, 99999)).toThrow(/payment not found/i);
+    });
+
+    it('should roll back completely if an error occurs mid-transaction during recordPayment', () => {
+      // Trigger error before debt update to verify atomicity
+      db.prepare(`
+        CREATE TRIGGER fail_debt_update BEFORE UPDATE ON debts
+        BEGIN
+          SELECT RAISE(ABORT, 'Simulated mid-transaction error');
+        END;
+      `).run();
+
+      expect(() =>
+        recordPayment(db, {
+          debt_id: debtId,
+          amount: 250,
+          currency: 'USD',
+          payment_date: '2026-09-10',
+          month_period: '2026-09',
+        })
+      ).toThrow(/Simulated mid-transaction error/i);
+
+      // Verify no payment was created
+      const payments = db.prepare('SELECT * FROM payments WHERE debt_id = ?').all(debtId);
+      expect(payments.length).toBe(0);
+
+      // Verify debt remaining_balance was NOT modified
+      const debt = getDebtById(db, debtId)!;
+      expect(debt.remaining_balance).toBe(1000);
+      expect(debt.is_active).toBe(1);
+
+      // Clean up trigger
+      db.prepare('DROP TRIGGER fail_debt_update').run();
+    });
+
+    it('should roll back completely if an error occurs mid-transaction during revertPayment', () => {
+      const { payment } = recordPayment(db, {
+        debt_id: debtId,
+        amount: 250,
+        currency: 'USD',
+        payment_date: '2026-09-10',
+        month_period: '2026-09',
+      });
+
+      // Create a trigger that fails when deleting from payments
+      db.prepare(`
+        CREATE TRIGGER fail_payment_delete BEFORE DELETE ON payments
+        BEGIN
+          SELECT RAISE(ABORT, 'Simulated revert error');
+        END;
+      `).run();
+
+      expect(() => revertPayment(db, payment.id)).toThrow(/Simulated revert error/i);
+
+      // Verify payment was NOT deleted
+      const paymentRow = db.prepare('SELECT * FROM payments WHERE id = ?').get(payment.id);
+      expect(paymentRow).toBeDefined();
+
+      // Verify debt balance was NOT modified by aborted revert
+      const debt = getDebtById(db, debtId)!;
+      expect(debt.remaining_balance).toBe(750);
+
+      // Clean up trigger
+      db.prepare('DROP TRIGGER fail_payment_delete').run();
     });
 
     it('should query payment history using helper functions', () => {
