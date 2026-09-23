@@ -110,6 +110,10 @@ export interface CategorySummary {
   total_due: number;
   total_paid: number;
   remaining_balance: number;
+  debt_count?: number;
+  totalDebt?: number;
+  monthlyObligations?: number;
+  debtCount?: number;
 }
 
 export interface MonthlySummary {
