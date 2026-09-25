@@ -19,6 +19,8 @@ interface DebtListProps {
   onEdit: (debt: DebtWithMonthlyStatus) => void;
   onDelete: (debt: DebtWithMonthlyStatus) => void;
   onAddDebt: (categoryId?: number) => void;
+  onMarkDone?: (debt: DebtWithMonthlyStatus) => void;
+  onReactivate?: (debt: DebtWithMonthlyStatus) => Promise<void> | void;
 }
 
 export const DebtList: React.FC<DebtListProps> = ({
@@ -30,6 +32,8 @@ export const DebtList: React.FC<DebtListProps> = ({
   onEdit,
   onDelete,
   onAddDebt,
+  onMarkDone,
+  onReactivate,
 }) => {
   // Collapsed categories state (default: all expanded)
   const [collapsedCategories, setCollapsedCategories] = useState<Record<number, boolean>>({});
@@ -196,6 +200,8 @@ export const DebtList: React.FC<DebtListProps> = ({
                         onUndoPayment={onUndoPayment}
                         onEdit={onEdit}
                         onDelete={onDelete}
+                        onMarkDone={onMarkDone}
+                        onReactivate={onReactivate}
                       />
                     ))}
                   </div>
@@ -223,6 +229,8 @@ export const DebtList: React.FC<DebtListProps> = ({
                 onUndoPayment={onUndoPayment}
                 onEdit={onEdit}
                 onDelete={onDelete}
+                onMarkDone={onMarkDone}
+                onReactivate={onReactivate}
               />
             ))}
           </div>

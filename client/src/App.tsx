@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Loader2, AlertCircle, RefreshCw, CheckCircle2, RotateCcw, X } from 'lucide-react';
 import {
   DebtWithMonthlyStatus,
   Category,
@@ -36,9 +36,13 @@ export const App: React.FC = () => {
   const [debts, setDebts] = useState<DebtWithMonthlyStatus[]>([]);
   const [summary, setSummary] = useState<MonthlySummary | null>(null);
 
-  // Loading & Error States
+  // Loading, Toast & Error States
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{
+    text: string;
+    action?: { label: string; onClick: () => void };
+  } | null>(null);
 
   // Modals State
   const [isDebtModalOpen, setIsDebtModalOpen] = useState<boolean>(false);
@@ -199,6 +203,44 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleMarkDone = async (debt: DebtWithMonthlyStatus) => {
+    if (
+      confirm(
+        `Are you sure you want to mark pawn "${debt.name}" as redeemed/settled?\n\nThis will mark the collateral item as retrieved and set the remaining balance to 0.`
+      )
+    ) {
+      try {
+        await api.updateDebt(debt.id, { is_active: 0, remaining_balance: 0 });
+        await loadDashboardData(selectedMonth, baseCurrency);
+        setToastMessage({
+          text: `Pawn "${debt.name}" marked as redeemed and settled.`,
+          action: {
+            label: 'Undo / Reactivate',
+            onClick: () => handleReactivate(debt),
+          },
+        });
+      } catch (err: unknown) {
+        if (err instanceof Error) {
+          alert(`Failed to mark pawn as done: ${err.message}`);
+        }
+      }
+    }
+  };
+
+  const handleReactivate = async (debt: DebtWithMonthlyStatus) => {
+    try {
+      await api.updateDebt(debt.id, { is_active: 1, remaining_balance: debt.total_amount });
+      await loadDashboardData(selectedMonth, baseCurrency);
+      setToastMessage({
+        text: `Pawn "${debt.name}" has been reactivated.`,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        alert(`Failed to reactivate pawn: ${err.message}`);
+      }
+    }
+  };
+
   // Payment Operations
   const handleConfirmPayment = async (paymentData: CreatePaymentInput) => {
     await api.recordPayment(paymentData);
@@ -288,6 +330,36 @@ export const App: React.FC = () => {
 
       {/* Main Dashboard Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        {/* Success Toast Banner */}
+        {toastMessage && (
+          <div className="mb-6 rounded-2xl bg-emerald-50 p-4 border border-emerald-200 flex items-center justify-between gap-3 text-emerald-800 shadow-sm animate-fadeIn">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-emerald-600" />
+              <span className="text-sm font-medium">{toastMessage.text}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {toastMessage.action && (
+                <button
+                  type="button"
+                  onClick={toastMessage.action.onClick}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 rounded-xl transition"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>{toastMessage.action.label}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setToastMessage(null)}
+                className="p-1 rounded-lg text-emerald-600 hover:text-emerald-800 hover:bg-emerald-100 transition"
+                aria-label="Dismiss message"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Error Alert Banner */}
         {errorMessage && (
           <div className="mb-6 rounded-2xl bg-red-50 p-4 border border-red-200 flex items-center justify-between gap-3 text-red-700">
@@ -332,6 +404,8 @@ export const App: React.FC = () => {
           onEdit={handleOpenEditDebt}
           onDelete={handleDeleteDebt}
           onAddDebt={handleOpenAddDebt}
+          onMarkDone={handleMarkDone}
+          onReactivate={handleReactivate}
         />
       </main>
 

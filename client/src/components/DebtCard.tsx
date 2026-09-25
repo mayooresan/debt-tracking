@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Loader2,
   Clock,
+  Gem,
 } from 'lucide-react';
 import { DebtWithMonthlyStatus } from '../types';
 import {
@@ -27,6 +28,8 @@ interface DebtCardProps {
   onUndoPayment: (paymentId: number) => Promise<void> | void;
   onEdit: (debt: DebtWithMonthlyStatus) => void;
   onDelete: (debt: DebtWithMonthlyStatus) => void;
+  onMarkDone?: (debt: DebtWithMonthlyStatus) => void;
+  onReactivate?: (debt: DebtWithMonthlyStatus) => Promise<void> | void;
 }
 
 export const DebtCard: React.FC<DebtCardProps> = ({
@@ -36,9 +39,15 @@ export const DebtCard: React.FC<DebtCardProps> = ({
   onUndoPayment,
   onEdit,
   onDelete,
+  onMarkDone,
+  onReactivate,
 }) => {
   const [isUndoing, setIsUndoing] = useState(false);
+  const [isReactivating, setIsReactivating] = useState(false);
   const CategoryIcon = getCategoryIcon(debt.category_icon);
+
+  const isPawning = debt.debt_type === 'pawning' || debt.debtType === 'pawning';
+  const accruedInterest = debt.accrued_interest ?? debt.accruedInterest ?? 0;
 
   // Payoff progress
   const payoffPercent =
@@ -66,10 +75,22 @@ export const DebtCard: React.FC<DebtCardProps> = ({
     }
   };
 
+  const handleReactivate = async () => {
+    if (!onReactivate) return;
+    setIsReactivating(true);
+    try {
+      await onReactivate(debt);
+    } finally {
+      setIsReactivating(false);
+    }
+  };
+
   return (
     <div
       className={`bg-white rounded-2xl border transition-all duration-200 overflow-hidden flex flex-col justify-between ${
-        debt.is_paid
+        debt.is_active === 0
+          ? 'border-gray-200 shadow-xs bg-gray-50/50 opacity-90'
+          : debt.is_paid
           ? 'border-emerald-200/90 shadow-sm bg-gradient-to-b from-white to-emerald-50/20'
           : 'border-gray-200/90 shadow-sm hover:shadow-md hover:border-gray-300'
       }`}
@@ -94,12 +115,19 @@ export const DebtCard: React.FC<DebtCardProps> = ({
                 </span>
               </span>
 
+              {isPawning && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 shadow-xs">
+                  <Gem className="w-3 h-3 text-amber-700" />
+                  <span>Pawning</span>
+                </span>
+              )}
+
               {debt.interest_rate !== null &&
                 debt.interest_rate !== undefined &&
                 debt.interest_rate > 0 && (
                   <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-700">
                     <Percent className="w-2.5 h-2.5" />
-                    <span>{debt.interest_rate}% APR</span>
+                    <span>{debt.interest_rate}% {isPawning ? '/ mo' : 'APR'}</span>
                   </span>
                 )}
 
@@ -139,7 +167,7 @@ export const DebtCard: React.FC<DebtCardProps> = ({
           </div>
         </div>
 
-        {/* Due Date & Monthly Payment */}
+        {/* Due Date & Monthly Payment / Interest */}
         <div className="grid grid-cols-2 gap-3 py-3 px-3.5 bg-gray-50/70 rounded-xl mb-4 border border-gray-100">
           <div>
             <span className="text-[11px] font-medium text-gray-500 flex items-center gap-1 mb-0.5">
@@ -153,7 +181,7 @@ export const DebtCard: React.FC<DebtCardProps> = ({
 
           <div>
             <span className="text-[11px] font-medium text-gray-500 block mb-0.5">
-              Monthly Payment
+              {isPawning ? 'Monthly Interest' : 'Monthly Payment'}
             </span>
             <div className="flex flex-col">
               <span className="text-xs font-bold text-gray-900">
@@ -168,17 +196,21 @@ export const DebtCard: React.FC<DebtCardProps> = ({
           </div>
         </div>
 
-        {/* Remaining Balance & Progress Bar */}
+        {/* Remaining Balance & Breakdown / Progress */}
         <div className="space-y-1.5">
           <div className="flex justify-between items-baseline text-xs">
-            <span className="text-gray-500 font-medium">Balance</span>
+            <span className="text-gray-500 font-medium">
+              {isPawning ? 'Total Pawn Debt' : 'Balance'}
+            </span>
             <div className="text-right">
               <span className="font-bold text-gray-900">
                 {formatCurrency(debt.remaining_balance, debt.currency)}
               </span>
-              <span className="text-gray-400 font-normal ml-1">
-                / {formatCurrency(debt.total_amount, debt.currency)}
-              </span>
+              {!isPawning && (
+                <span className="text-gray-400 font-normal ml-1">
+                  / {formatCurrency(debt.total_amount, debt.currency)}
+                </span>
+              )}
               {isMultiCurrency && debt.converted_remaining_balance !== undefined && (
                 <div className="text-[10px] text-gray-500">
                   ~{formatCurrency(debt.converted_remaining_balance, baseCurrency)} remaining
@@ -187,37 +219,60 @@ export const DebtCard: React.FC<DebtCardProps> = ({
             </div>
           </div>
 
-          <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+          {/* Breakdown for Pawning debts when accrued interest > 0 */}
+          {isPawning && accruedInterest > 0 && (
             <div
-              className={`h-2 rounded-full transition-all duration-500 ${
-                debt.remaining_balance === 0
-                  ? 'bg-emerald-500'
-                  : 'bg-gradient-to-r from-blue-500 to-indigo-600'
-              }`}
-              style={{ width: `${payoffPercent}%` }}
-            />
-          </div>
-
-          <div className="flex justify-between text-[11px] text-gray-500">
-            <span>{payoffPercent}% paid off</span>
-            {debt.remaining_balance === 0 && (
-              <span className="font-semibold text-emerald-600">Fully Paid!</span>
-            )}
-          </div>
-
-          {/* Installment Countdown & Projected Payoff Date */}
-          {debt.remaining_balance > 0 && debt.remaining_months > 0 && (
-            <div className="pt-2.5 mt-1 border-t border-gray-100 flex items-center justify-between text-[11px]">
-              <span className="inline-flex items-center gap-1 font-semibold text-indigo-700 bg-indigo-50/90 px-2 py-0.5 rounded-md border border-indigo-100">
-                <Clock className="w-3 h-3 text-indigo-600" />
-                <span>{debt.remaining_months} {debt.remaining_months === 1 ? 'month' : 'months'} left</span>
-              </span>
-              {debt.projected_payoff_date && (
-                <span className="text-gray-500 font-medium">
-                  Payoff: <strong className="text-gray-700 font-semibold">{formatMonthYear(debt.projected_payoff_date)}</strong>
-                </span>
-              )}
+              className="text-[11px] text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-200/60 flex items-center justify-between font-medium"
+              title={`Base: ${formatCurrency(debt.total_amount, debt.currency)} • Compounded Interest: +${formatCurrency(accruedInterest, debt.currency)}`}
+            >
+              <span>Base: {formatCurrency(debt.total_amount, debt.currency)}</span>
+              <span className="text-amber-400 font-bold">•</span>
+              <span>Accrued Interest: +{formatCurrency(accruedInterest, debt.currency)}</span>
             </div>
+          )}
+
+          {!isPawning ? (
+            <>
+              <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                <div
+                  className={`h-2 rounded-full transition-all duration-500 ${
+                    debt.remaining_balance === 0
+                      ? 'bg-emerald-500'
+                      : 'bg-gradient-to-r from-blue-500 to-indigo-600'
+                  }`}
+                  style={{ width: `${payoffPercent}%` }}
+                />
+              </div>
+
+              <div className="flex justify-between text-[11px] text-gray-500">
+                <span>{payoffPercent}% paid off</span>
+                {debt.remaining_balance === 0 && (
+                  <span className="font-semibold text-emerald-600">Fully Paid!</span>
+                )}
+              </div>
+
+              {/* Installment Countdown & Projected Payoff Date */}
+              {debt.remaining_balance > 0 && debt.remaining_months > 0 && (
+                <div className="pt-2.5 mt-1 border-t border-gray-100 flex items-center justify-between text-[11px]">
+                  <span className="inline-flex items-center gap-1 font-semibold text-indigo-700 bg-indigo-50/90 px-2 py-0.5 rounded-md border border-indigo-100">
+                    <Clock className="w-3 h-3 text-indigo-600" />
+                    <span>{debt.remaining_months} {debt.remaining_months === 1 ? 'month' : 'months'} left</span>
+                  </span>
+                  {debt.projected_payoff_date && (
+                    <span className="text-gray-500 font-medium">
+                      Payoff: <strong className="text-gray-700 font-semibold">{formatMonthYear(debt.projected_payoff_date)}</strong>
+                    </span>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            (debt.is_active === 0 || debt.remaining_balance === 0) && (
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-200/60">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Pawn Redeemed & Settled</span>
+              </div>
+            )
           )}
         </div>
 
@@ -232,12 +287,37 @@ export const DebtCard: React.FC<DebtCardProps> = ({
 
       {/* Bottom Payment Action Bar */}
       <div className="px-5 py-3.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-3">
-        {debt.is_paid ? (
+        {debt.is_active === 0 ? (
+          <>
+            <div className="flex items-center gap-1.5 text-emerald-700">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span className="text-xs font-semibold">Redeemed / Settled</span>
+            </div>
+
+            {onReactivate && (
+              <button
+                type="button"
+                disabled={isReactivating}
+                onClick={handleReactivate}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg border border-gray-200 hover:border-blue-200 transition disabled:opacity-50"
+                title="Reactivate pawn debt"
+                aria-label="Reactivate pawn debt"
+              >
+                {isReactivating ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <RotateCcw className="w-3 h-3" />
+                )}
+                <span>Reactivate</span>
+              </button>
+            )}
+          </>
+        ) : debt.is_paid ? (
           <>
             <div className="flex items-center gap-1.5 text-emerald-700">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <div className="text-xs font-semibold leading-tight">
-                <span>Paid ✓</span>
+                <span>{isPawning ? 'Interest Paid ✓' : 'Paid ✓'}</span>
                 {debt.paid_at && (
                   <span className="text-[11px] text-emerald-600/80 font-normal ml-1">
                     ({formatDate(debt.paid_at, false)})
@@ -246,20 +326,36 @@ export const DebtCard: React.FC<DebtCardProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              disabled={isUndoing}
-              onClick={handleUndo}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg border border-gray-200 hover:border-red-200 transition disabled:opacity-50"
-              title="Undo monthly payment"
-            >
-              {isUndoing ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                <RotateCcw className="w-3 h-3" />
+            <div className="flex items-center gap-2">
+              {isPawning && onMarkDone && (
+                <button
+                  type="button"
+                  onClick={() => onMarkDone(debt)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 transition"
+                  title="Mark Done (Redeem)"
+                  aria-label="Mark Done (Redeem)"
+                >
+                  <CheckCircle2 className="w-3 h-3 text-amber-600" />
+                  <span>Redeem</span>
+                </button>
               )}
-              <span>Undo</span>
-            </button>
+
+              <button
+                type="button"
+                disabled={isUndoing}
+                onClick={handleUndo}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg border border-gray-200 hover:border-red-200 transition disabled:opacity-50"
+                title={isPawning ? 'Undo monthly interest payment' : 'Undo monthly payment'}
+                aria-label={isPawning ? 'Undo monthly interest payment' : 'Undo monthly payment'}
+              >
+                {isUndoing ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <RotateCcw className="w-3 h-3" />
+                )}
+                <span>Undo</span>
+              </button>
+            </div>
           </>
         ) : debt.is_upcoming ? (
           <>
@@ -268,15 +364,31 @@ export const DebtCard: React.FC<DebtCardProps> = ({
               <span>Starts {formatMonthYear(debt.start_month || '')} • Not Due Yet</span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => onMarkPaid(debt)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl border border-gray-200 hover:border-emerald-200 transition"
-              title="Pay installment early"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>Pay Early</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {isPawning && onMarkDone && (
+                <button
+                  type="button"
+                  onClick={() => onMarkDone(debt)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-xl border border-amber-200 transition"
+                  title="Mark Done (Redeem)"
+                  aria-label="Mark Done (Redeem)"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Redeem</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => onMarkPaid(debt)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl border border-gray-200 hover:border-emerald-200 transition"
+                title={isPawning ? 'Pay interest early' : 'Pay installment early'}
+                aria-label={isPawning ? 'Pay interest early' : 'Pay installment early'}
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{isPawning ? 'Pay Interest Early' : 'Pay Early'}</span>
+              </button>
+            </div>
           </>
         ) : (
           <>
@@ -284,14 +396,31 @@ export const DebtCard: React.FC<DebtCardProps> = ({
               Due: {formatCurrency(debt.monthly_payment, debt.currency)}
             </div>
 
-            <button
-              type="button"
-              onClick={() => onMarkPaid(debt)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs shadow-emerald-600/20 transition active:scale-[0.98]"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>Mark Paid</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {isPawning && onMarkDone && (
+                <button
+                  type="button"
+                  onClick={() => onMarkDone(debt)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-xl border border-amber-200 transition"
+                  title="Mark Done (Redeem)"
+                  aria-label="Mark Done (Redeem)"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Redeem</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => onMarkPaid(debt)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs shadow-emerald-600/20 transition active:scale-[0.98]"
+                title={isPawning ? 'Pay Interest' : 'Mark Paid'}
+                aria-label={isPawning ? 'Pay Interest' : 'Mark Paid'}
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{isPawning ? 'Pay Interest' : 'Mark Paid'}</span>
+              </button>
+            </div>
           </>
         )}
       </div>
