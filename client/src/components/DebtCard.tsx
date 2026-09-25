@@ -88,7 +88,7 @@ export const DebtCard: React.FC<DebtCardProps> = ({
   return (
     <div
       className={`bg-white rounded-2xl border transition-all duration-200 overflow-hidden flex flex-col justify-between ${
-        debt.is_active === 0
+        isPawning && debt.is_active === 0
           ? 'border-gray-200 shadow-xs bg-gray-50/50 opacity-90'
           : debt.is_paid
           ? 'border-emerald-200/90 shadow-sm bg-gradient-to-b from-white to-emerald-50/20'
@@ -227,7 +227,7 @@ export const DebtCard: React.FC<DebtCardProps> = ({
             >
               <span>Base: {formatCurrency(debt.total_amount, debt.currency)}</span>
               <span className="text-amber-400 font-bold">•</span>
-              <span>Accrued Interest: +{formatCurrency(accruedInterest, debt.currency)}</span>
+              <span>Compounded Interest: +{formatCurrency(accruedInterest, debt.currency)}</span>
             </div>
           )}
 
@@ -287,7 +287,7 @@ export const DebtCard: React.FC<DebtCardProps> = ({
 
       {/* Bottom Payment Action Bar */}
       <div className="px-5 py-3.5 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-3">
-        {debt.is_active === 0 ? (
+        {isPawning && debt.is_active === 0 ? (
           <>
             <div className="flex items-center gap-1.5 text-emerald-700">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
