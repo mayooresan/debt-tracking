@@ -414,6 +414,122 @@ describe('Debt & Payment Core Service', () => {
 
       expect(deleteDebt(db, 99999)).toBe(false);
     });
+
+    it('should create a pawning debt and auto-initialize monthly payment from interest rate', () => {
+      const db = initDb(':memory:');
+      const cat = createCategory(db, { name: 'Pawn Shop' });
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Gold Ring Pawn',
+        total_amount: 1000,
+        monthly_payment: 0,
+        interest_rate: 2.5,
+        start_month: '2026-01',
+        debt_type: 'pawning',
+      });
+
+      expect(debt.debt_type).toBe('pawning');
+      expect(debt.total_amount).toBe(1000);
+      expect(debt.remaining_balance).toBe(1000);
+      expect(debt.interest_rate).toBe(2.5);
+      expect(debt.monthly_payment).toBe(25); // 1000 * 2.5% = 25
+    });
+
+    it('should update pawning debt base amount and adjust initial monthly payment', () => {
+      const db = initDb(':memory:');
+      const cat = createCategory(db, { name: 'Pawn Shop' });
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Gold Ring Pawn',
+        total_amount: 1000,
+        monthly_payment: 25,
+        interest_rate: 2.5,
+        debt_type: 'pawning',
+      });
+
+      const updated = updateDebt(db, debt.id, {
+        total_amount: 1500,
+        remaining_balance: 1500,
+      });
+
+      expect(updated.total_amount).toBe(1500);
+      expect(updated.remaining_balance).toBe(1500);
+      expect(updated.monthly_payment).toBe(37.5); // 1500 * 2.5% = 37.5
+    });
+
+    it('should auto-initialize monthly payment if monthly_payment is omitted when creating pawning debt', () => {
+      const cat = createCategory(db, { name: 'Diamond Pawn' });
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Diamond Necklace Pawn',
+        total_amount: 2000,
+        interest_rate: 3.0,
+        debt_type: 'pawning',
+      } as any);
+
+      expect(debt.debt_type).toBe('pawning');
+      expect(debt.monthly_payment).toBe(60); // 2000 * 3.0% = 60
+    });
+
+    it('should validate debt_type on createDebt and updateDebt', () => {
+      expect(() =>
+        createDebt(db, {
+          category_id: loanCategoryId,
+          name: 'Invalid Type',
+          total_amount: 500,
+          monthly_payment: 50,
+          debt_type: 'invalid' as any,
+        })
+      ).toThrow(/debt_type must be either 'standard' or 'pawning'/i);
+
+      const debt = createDebt(db, {
+        category_id: loanCategoryId,
+        name: 'Standard Debt',
+        total_amount: 500,
+        monthly_payment: 50,
+      });
+
+      expect(() =>
+        updateDebt(db, debt.id, {
+          debt_type: 'unsupported' as any,
+        })
+      ).toThrow(/debt_type must be either 'standard' or 'pawning'/i);
+    });
+
+    it('should allow overriding monthly payment explicitly for pawning debt on update', () => {
+      const debt = createDebt(db, {
+        category_id: loanCategoryId,
+        name: 'Custom Payment Pawn',
+        total_amount: 1000,
+        interest_rate: 2.5,
+        debt_type: 'pawning',
+      });
+
+      const updated = updateDebt(db, debt.id, {
+        total_amount: 1500,
+        monthly_payment: 50,
+      });
+
+      expect(updated.total_amount).toBe(1500);
+      expect(updated.monthly_payment).toBe(50);
+    });
+
+    it('should mark pawning debt as done by setting is_active to 0 and clearing remaining_balance', () => {
+      const debt = createDebt(db, {
+        category_id: loanCategoryId,
+        name: 'Pawn To Redeem',
+        total_amount: 1000,
+        interest_rate: 2.5,
+        debt_type: 'pawning',
+      });
+
+      const updated = updateDebt(db, debt.id, {
+        is_active: 0,
+      });
+
+      expect(updated.is_active).toBe(0);
+      expect(updated.remaining_balance).toBe(0);
+    });
   });
 
   describe('Payments & Atomic Transactions', () => {

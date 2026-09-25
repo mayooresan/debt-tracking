@@ -495,6 +495,90 @@ describe('Express REST API & Server Integration Tests', () => {
         .set('Cookie', cookie);
       expect(fetchRes.status).toBe(404);
     });
+
+    it('POST /api/debts creates a pawning debt and auto-initializes monthly payment', async () => {
+      const res = await request(app)
+        .post('/api/debts')
+        .set('Cookie', cookie)
+        .send({
+          category_id: categoryId,
+          name: 'Pawn Gold Bracelet',
+          total_amount: 1000,
+          interest_rate: 2.5,
+          debt_type: 'pawning',
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.debt_type).toBe('pawning');
+      expect(res.body.monthly_payment).toBe(25);
+    });
+
+    it('POST /api/debts fails with 400 on invalid debt_type', async () => {
+      const res = await request(app)
+        .post('/api/debts')
+        .set('Cookie', cookie)
+        .send({
+          category_id: categoryId,
+          name: 'Invalid Type Pawn',
+          total_amount: 1000,
+          monthly_payment: 50,
+          debt_type: 'unknown',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/debt_type/i);
+    });
+
+    it('PUT /api/debts/:id recalculates monthly payment when base amount changes on pawning debt', async () => {
+      const createRes = await request(app)
+        .post('/api/debts')
+        .set('Cookie', cookie)
+        .send({
+          category_id: categoryId,
+          name: 'Pawn Watch',
+          total_amount: 1000,
+          interest_rate: 2.0,
+          debt_type: 'pawning',
+        });
+      const debtId = createRes.body.id;
+      expect(createRes.body.monthly_payment).toBe(20);
+
+      const updateRes = await request(app)
+        .put(`/api/debts/${debtId}`)
+        .set('Cookie', cookie)
+        .send({
+          total_amount: 2000,
+        });
+
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.total_amount).toBe(2000);
+      expect(updateRes.body.monthly_payment).toBe(40);
+    });
+
+    it('PUT /api/debts/:id marks pawning debt done (is_active = 0)', async () => {
+      const createRes = await request(app)
+        .post('/api/debts')
+        .set('Cookie', cookie)
+        .send({
+          category_id: categoryId,
+          name: 'Redeemable Pawn',
+          total_amount: 1000,
+          interest_rate: 2.5,
+          debt_type: 'pawning',
+        });
+      const debtId = createRes.body.id;
+
+      const updateRes = await request(app)
+        .put(`/api/debts/${debtId}`)
+        .set('Cookie', cookie)
+        .send({
+          is_active: 0,
+        });
+
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.is_active).toBe(0);
+      expect(updateRes.body.remaining_balance).toBe(0);
+    });
   });
 
   describe('5. Payments API (/api/payments)', () => {

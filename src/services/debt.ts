@@ -133,7 +133,12 @@ export function getDebtById(db: Database, id: number): Debt | null {
   const debt = database
     .prepare('SELECT * FROM debts WHERE id = ?')
     .get(id) as Debt | undefined;
-  return debt || null;
+  if (!debt) return null;
+  return {
+    ...debt,
+    debt_type: debt.debt_type || 'standard',
+    debtType: debt.debt_type || 'standard',
+  };
 }
 
 /**
@@ -144,17 +149,32 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
   const database = db || getDb();
   const raw = input as any;
 
+  const rawDebtType = raw.debt_type ?? raw.debtType ?? 'standard';
+  if (typeof rawDebtType !== 'string') {
+    throw new Error("debt_type must be either 'standard' or 'pawning'");
+  }
+  const debt_type = rawDebtType.trim().toLowerCase();
+  if (debt_type !== 'standard' && debt_type !== 'pawning') {
+    throw new Error("debt_type must be either 'standard' or 'pawning'");
+  }
+
   const category_id = raw.category_id ?? raw.categoryId;
   const name = raw.name?.trim();
   const total_amount = raw.total_amount ?? raw.totalAmount;
   const remaining_balance =
     raw.remaining_balance ?? raw.remainingBalance ?? total_amount;
-  const monthly_payment = raw.monthly_payment ?? raw.monthlyPayment;
+  let monthly_payment = raw.monthly_payment ?? raw.monthlyPayment;
   const currency = (raw.currency || 'USD').trim().toUpperCase();
   const due_day = raw.due_day ?? raw.dueDay ?? 1;
   const interest_rate = raw.interest_rate ?? raw.interestRate ?? 0.0;
   const term_months = raw.term_months ?? raw.termMonths ?? null;
   const notes = raw.notes ?? null;
+
+  if (debt_type === 'pawning') {
+    if (monthly_payment === undefined || monthly_payment === null || monthly_payment === 0) {
+      monthly_payment = Math.round(total_amount * ((interest_rate || 0) / 100) * 100) / 100;
+    }
+  }
 
   let start_month = (raw.start_month ?? raw.startMonth ?? '').trim();
   if (!start_month) {
@@ -196,8 +216,8 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
   const stmt = database.prepare(`
     INSERT INTO debts (
       category_id, name, total_amount, remaining_balance, monthly_payment,
-      currency, due_day, interest_rate, term_months, start_month, notes, is_active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      currency, due_day, interest_rate, term_months, start_month, notes, is_active, debt_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
@@ -212,12 +232,18 @@ export function createDebt(db: Database, input: CreateDebtInput): Debt {
     term_months,
     start_month,
     notes,
-    is_active
+    is_active,
+    debt_type
   );
 
-  return database
+  const inserted = database
     .prepare('SELECT * FROM debts WHERE id = ?')
     .get(result.lastInsertRowid) as Debt;
+  return {
+    ...inserted,
+    debt_type: inserted.debt_type || 'standard',
+    debtType: inserted.debt_type || 'standard',
+  };
 }
 
 /**
@@ -239,18 +265,25 @@ export function updateDebt(
   }
 
   const raw = input as any;
+  const rawDebtType = raw.debt_type ?? raw.debtType ?? existing.debt_type ?? 'standard';
+  if (typeof rawDebtType !== 'string') {
+    throw new Error("debt_type must be either 'standard' or 'pawning'");
+  }
+  const debt_type = rawDebtType.trim().toLowerCase();
+  if (debt_type !== 'standard' && debt_type !== 'pawning') {
+    throw new Error("debt_type must be either 'standard' or 'pawning'");
+  }
+
   const category_id = raw.category_id ?? raw.categoryId ?? existing.category_id;
   const name = raw.name !== undefined ? raw.name.trim() : existing.name;
   if (name === '') {
     throw new Error('Debt name cannot be empty');
   }
   const total_amount = raw.total_amount ?? raw.totalAmount ?? existing.total_amount;
-  const monthly_payment =
-    raw.monthly_payment ?? raw.monthlyPayment ?? existing.monthly_payment;
   const currency = (raw.currency ?? existing.currency).trim().toUpperCase();
   const due_day = raw.due_day ?? raw.dueDay ?? existing.due_day;
   const interest_rate =
-    raw.interest_rate ?? raw.interestRate ?? existing.interest_rate;
+    raw.interest_rate ?? raw.interestRate ?? existing.interest_rate ?? 0.0;
   const term_months =
     raw.term_months !== undefined
       ? raw.term_months
@@ -258,6 +291,20 @@ export function updateDebt(
       ? raw.termMonths
       : existing.term_months;
   const notes = raw.notes !== undefined ? raw.notes : existing.notes;
+
+  const hasMonthlyPayment = raw.monthly_payment !== undefined || raw.monthlyPayment !== undefined;
+  const hasTotalAmount = raw.total_amount !== undefined || raw.totalAmount !== undefined;
+  const hasInterestRate = raw.interest_rate !== undefined || raw.interestRate !== undefined;
+
+  let monthly_payment =
+    raw.monthly_payment ?? raw.monthlyPayment ?? existing.monthly_payment;
+  if (
+    debt_type === 'pawning' &&
+    (hasTotalAmount || hasInterestRate) &&
+    !hasMonthlyPayment
+  ) {
+    monthly_payment = Math.round(total_amount * ((interest_rate || 0) / 100) * 100) / 100;
+  }
 
   let start_month = existing.start_month;
   if (raw.start_month !== undefined || raw.startMonth !== undefined) {
@@ -270,7 +317,18 @@ export function updateDebt(
 
   let remaining_balance =
     raw.remaining_balance ?? raw.remainingBalance ?? existing.remaining_balance;
-  let is_active = raw.is_active ?? raw.isActive;
+  let is_active = raw.is_active !== undefined ? raw.is_active : raw.isActive;
+  if (typeof is_active === 'boolean') {
+    is_active = is_active ? 1 : 0;
+  } else if (typeof is_active === 'number') {
+    is_active = is_active === 0 ? 0 : 1;
+  } else if (typeof is_active === 'string') {
+    is_active = is_active === '0' || is_active.toLowerCase() === 'false' ? 0 : 1;
+  }
+
+  if (is_active === 0 && raw.remaining_balance === undefined && raw.remainingBalance === undefined && debt_type === 'pawning') {
+    remaining_balance = 0;
+  }
 
   if (raw.total_amount !== undefined || raw.totalAmount !== undefined) {
     if (typeof total_amount !== 'number' || isNaN(total_amount) || total_amount < 0) {
@@ -282,7 +340,7 @@ export function updateDebt(
       throw new Error('remaining_balance must be a non-negative number');
     }
   }
-  if (raw.monthly_payment !== undefined || raw.monthlyPayment !== undefined) {
+  if (raw.monthly_payment !== undefined || raw.monthlyPayment !== undefined || (debt_type === 'pawning' && (hasTotalAmount || hasInterestRate))) {
     if (typeof monthly_payment !== 'number' || isNaN(monthly_payment) || monthly_payment < 0) {
       throw new Error('monthly_payment must be a non-negative number');
     }
@@ -325,6 +383,7 @@ export function updateDebt(
       start_month = ?,
       notes = ?,
       is_active = ?,
+      debt_type = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
@@ -340,12 +399,18 @@ export function updateDebt(
     start_month,
     notes,
     is_active,
+    debt_type,
     id
   );
 
-  return database
+  const updated = database
     .prepare('SELECT * FROM debts WHERE id = ?')
     .get(id) as Debt;
+  return {
+    ...updated,
+    debt_type: updated.debt_type || 'standard',
+    debtType: updated.debt_type || 'standard',
+  };
 }
 
 /**
@@ -637,6 +702,8 @@ export function listDebtsWithMonthlyStatus(
       start_month,
       notes: row.notes,
       is_active: row.is_active,
+      debt_type: row.debt_type || 'standard',
+      debtType: row.debt_type || 'standard',
       created_at: row.created_at,
       updated_at: row.updated_at,
       category_name: row.category_name,

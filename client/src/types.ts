@@ -49,7 +49,7 @@ export interface CreateDebtInput {
   name: string;
   total_amount: number;
   remaining_balance?: number;
-  monthly_payment: number;
+  monthly_payment?: number;
   currency?: string;
   due_day?: number;
   interest_rate?: number;

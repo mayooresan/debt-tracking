@@ -159,7 +159,7 @@ apiRouter.get('/debts', (req: Request, res: Response): void => {
 
 /**
  * POST /api/debts
- * Creates a new debt obligation.
+ * Creates a new debt obligation (supports standard and pawning debt types).
  */
 apiRouter.post('/debts', (req: Request, res: Response): void => {
   const db = getDatabase(req);
@@ -204,7 +204,7 @@ apiRouter.get('/debts/:id', (req: Request, res: Response): void => {
 
 /**
  * PUT /api/debts/:id
- * Updates debt details.
+ * Updates debt details (base amount, monthly payment, debt type, or is_active).
  */
 apiRouter.put('/debts/:id', (req: Request, res: Response): void => {
   const db = getDatabase(req);
