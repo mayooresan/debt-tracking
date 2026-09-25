@@ -892,32 +892,22 @@ export function getMonthlySummary(
     'USD'
   ).trim().toUpperCase();
 
-  // 1. Total Debt: sum of all debts with remaining_balance > 0 where start_month <= monthPeriod or paid in monthPeriod
-  const allDebtsWithBalance = database
-    .prepare(`
-      SELECT category_id, remaining_balance, currency 
-      FROM debts 
-      WHERE remaining_balance > 0 
-        AND (start_month <= ? OR id IN (SELECT debt_id FROM payments WHERE month_period = ?))
-    `)
-    .all(monthPeriod, monthPeriod) as { category_id: number; remaining_balance: number; currency: string }[];
+  // Load debts for this month with dynamically calculated pawning balances and obligations
+  const debts = listDebtsWithMonthlyStatus(database, monthPeriod, targetBaseCurrency);
+  const activeDebts = debts.filter((d) => !d.is_upcoming);
 
+  // 1. Total Debt: sum of all non-upcoming debts with remaining_balance > 0
   let totalDebt = 0;
-  for (const debt of allDebtsWithBalance) {
-    totalDebt += convertAmount(debt.remaining_balance, debt.currency, targetBaseCurrency, rates);
+  for (const debt of activeDebts) {
+    if (debt.remaining_balance > 0) {
+      totalDebt += debt.converted_remaining_balance;
+    }
   }
 
-  // 2. Monthly Obligations: sum of monthly_payment for active debts whose start_month <= monthPeriod OR debts paid this month
-  const obligationsDebts = database.prepare(`
-    SELECT DISTINCT d.id, d.monthly_payment, d.currency, d.category_id
-    FROM debts d
-    LEFT JOIN payments p ON d.id = p.debt_id AND p.month_period = ?
-    WHERE (d.is_active = 1 AND d.start_month <= ?) OR p.id IS NOT NULL
-  `).all(monthPeriod, monthPeriod) as { id: number; monthly_payment: number; currency: string; category_id: number }[];
-
+  // 2. Monthly Obligations: sum of monthly_payment due for non-upcoming debts
   let monthlyObligations = 0;
-  for (const debt of obligationsDebts) {
-    monthlyObligations += convertAmount(debt.monthly_payment, debt.currency, targetBaseCurrency, rates);
+  for (const debt of activeDebts) {
+    monthlyObligations += debt.converted_monthly_payment;
   }
 
   // 3. Paid this month: sum of all payments in target month converted to baseCurrency
@@ -953,10 +943,10 @@ export function getMonthlySummary(
 
   for (const category of categories) {
     // Debts in category
-    const catDebts = obligationsDebts.filter((d) => d.category_id === category.id);
+    const catDebts = activeDebts.filter((d) => d.category_id === category.id);
     let catTotalDue = 0;
     for (const debt of catDebts) {
-      catTotalDue += convertAmount(debt.monthly_payment, debt.currency, targetBaseCurrency, rates);
+      catTotalDue += debt.converted_monthly_payment;
     }
 
     // Payments in category for target month
@@ -967,11 +957,11 @@ export function getMonthlySummary(
     }
 
     // Remaining balance for debts in this category (aggregated in-memory, no N+1 query)
-    const catBalanceDebts = allDebtsWithBalance.filter((d) => d.category_id === category.id);
+    const catBalanceDebts = catDebts.filter((d) => d.remaining_balance > 0);
 
     let catRemainingBalance = 0;
     for (const debt of catBalanceDebts) {
-      catRemainingBalance += convertAmount(debt.remaining_balance, debt.currency, targetBaseCurrency, rates);
+      catRemainingBalance += debt.converted_remaining_balance;
     }
 
     const debtCount = catBalanceDebts.length;

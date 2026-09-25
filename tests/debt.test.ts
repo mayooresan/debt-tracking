@@ -1388,6 +1388,70 @@ describe('Debt & Payment Core Service', () => {
       expect(pawnDebt.converted_remaining_balance).toBe(1200);
       expect(pawnDebt.converted_monthly_payment).toBe(24);
     });
+
+    it('should include compounded pawning debt and monthly interest obligation in getMonthlySummary', () => {
+      const db = initDb(':memory:');
+      const cat = createCategory(db, { name: 'Pawn' });
+      createDebt(db, {
+        category_id: cat.id,
+        name: 'Pawned Jewelry',
+        total_amount: 1000,
+        interest_rate: 2, // 2% per month
+        start_month: '2026-01',
+        debt_type: 'pawning',
+      });
+
+      // In Month 2 (2026-02), unpaid month 1 interest compounds:
+      // Total Debt: 1020, Monthly Obligations: 20.40
+      const summaryM2 = getMonthlySummary(db, '2026-02', 'USD');
+      expect(summaryM2.total_debt).toBe(1020);
+      expect(summaryM2.monthly_obligations).toBe(20.4);
+      expect(summaryM2.paid_this_month).toBe(0);
+      expect(summaryM2.pending_this_month).toBe(20.4);
+
+      // Category breakdown checks
+      const pawnCat = summaryM2.category_breakdown.find((c) => c.category_id === cat.id)!;
+      expect(pawnCat.remaining_balance).toBe(1020);
+      expect(pawnCat.totalDebt).toBe(1020);
+      expect(pawnCat.total_due).toBe(20.4);
+      expect(pawnCat.monthlyObligations).toBe(20.4);
+    });
+
+    it('should reflect pawning payments and base currency conversion in getMonthlySummary', () => {
+      const db = initDb(':memory:');
+      db.prepare(`
+        INSERT INTO exchange_rates (base_currency, target_currency, rate)
+        VALUES ('USD', 'USD', 1.0), ('USD', 'EUR', 0.85)
+      `).run();
+
+      const cat = createCategory(db, { name: 'Pawn EUR' });
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Pawned Watch EUR',
+        total_amount: 1000,
+        interest_rate: 2, // 2% = 20 EUR monthly
+        start_month: '2026-01',
+        debt_type: 'pawning',
+        currency: 'EUR',
+      });
+
+      // Pay Month 1 interest (20 EUR)
+      recordPayment(db, {
+        debt_id: debt.id,
+        amount: 20,
+        currency: 'EUR',
+        payment_date: '2026-01-15',
+        month_period: '2026-01',
+      });
+
+      // Month 2 (2026-02):
+      // No compounding occurred: remaining 1000 EUR, interest 20 EUR.
+      // Converted to USD (rate 0.85):
+      // 1000 / 0.85 = 1176.47 USD, 20 / 0.85 = 23.53 USD
+      const summaryM2 = getMonthlySummary(db, '2026-02', 'USD');
+      expect(summaryM2.total_debt).toBe(1176.47);
+      expect(summaryM2.monthly_obligations).toBe(23.53);
+    });
   });
 });
 
