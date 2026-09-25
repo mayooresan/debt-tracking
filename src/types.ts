@@ -18,6 +18,8 @@ export interface UpdateCategoryInput {
   icon?: string;
 }
 
+export type DebtType = 'standard' | 'pawning';
+
 export interface Debt {
   id: number;
   category_id: number;
@@ -32,6 +34,8 @@ export interface Debt {
   start_month: string;
   notes: string | null;
   is_active: number;
+  debt_type?: DebtType;
+  debtType?: DebtType;
   created_at: string;
   updated_at: string;
 }
@@ -48,6 +52,8 @@ export interface CreateDebtInput {
   term_months?: number;
   start_month?: string;
   startMonth?: string;
+  debt_type?: DebtType;
+  debtType?: DebtType;
   notes?: string;
 }
 
@@ -63,6 +69,8 @@ export interface UpdateDebtInput {
   term_months?: number;
   start_month?: string;
   startMonth?: string;
+  debt_type?: DebtType;
+  debtType?: DebtType;
   notes?: string;
   is_active?: number;
 }
@@ -80,6 +88,8 @@ export interface DebtWithMonthlyStatus extends Debt {
   projected_payoff_date: string | null;
   converted_monthly_payment?: number;
   converted_remaining_balance?: number;
+  accrued_interest?: number;
+  total_pawn_payoff?: number;
 }
 
 export interface Payment {

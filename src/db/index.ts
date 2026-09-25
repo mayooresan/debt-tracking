@@ -22,7 +22,8 @@ INSERT OR IGNORE INTO categories (name, color, icon) VALUES
   ('Loans', '#3B82F6', 'landmark'),
   ('Credit Cards', '#EF4444', 'credit-card'),
   ('Installments', '#10B981', 'calendar-clock'),
-  ('Subscriptions & Others', '#8B5CF6', 'tag');
+  ('Subscriptions & Others', '#8B5CF6', 'tag'),
+  ('Pawning', '#F59E0B', 'gem');
 
 -- 2. Debts
 CREATE TABLE IF NOT EXISTS debts (
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS debts (
   interest_rate REAL DEFAULT 0.0,
   term_months INTEGER,
   start_month TEXT NOT NULL DEFAULT (strftime('%Y-%m', 'now')),
+  debt_type TEXT NOT NULL DEFAULT 'standard',
   notes TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -135,6 +137,12 @@ export function initDb(dbPath?: string): DatabaseType {
     if (!hasStartMonth && tableInfo.length > 0) {
       db.prepare("ALTER TABLE debts ADD COLUMN start_month TEXT NOT NULL DEFAULT (strftime('%Y-%m', 'now'))").run();
     }
+    const hasDebtType = tableInfo.some((col) => col.name === 'debt_type');
+    if (!hasDebtType && tableInfo.length > 0) {
+      db.prepare("ALTER TABLE debts ADD COLUMN debt_type TEXT NOT NULL DEFAULT 'standard'").run();
+    }
+    // Seed default Pawning category if missing in existing database
+    db.prepare("INSERT OR IGNORE INTO categories (name, color, icon) VALUES ('Pawning', '#F59E0B', 'gem')").run();
   } catch {
     // Ignore migration error if table does not exist yet
   }

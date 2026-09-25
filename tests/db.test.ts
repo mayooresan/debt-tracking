@@ -49,12 +49,13 @@ describe('Database Layer & Schema Initialization', () => {
       icon: string;
     }[];
 
-    expect(categories).toHaveLength(4);
+    expect(categories).toHaveLength(5);
     expect(categories).toEqual([
       { name: 'Loans', color: '#3B82F6', icon: 'landmark' },
       { name: 'Credit Cards', color: '#EF4444', icon: 'credit-card' },
       { name: 'Installments', color: '#10B981', icon: 'calendar-clock' },
       { name: 'Subscriptions & Others', color: '#8B5CF6', icon: 'tag' },
+      { name: 'Pawning', color: '#F59E0B', icon: 'gem' },
     ]);
   });
 
@@ -143,15 +144,16 @@ describe('Database Layer & Schema Initialization', () => {
       const db2 = initDb(tempDbPath);
 
       const count = db2.prepare('SELECT COUNT(*) as cnt FROM categories;').get() as { cnt: number };
-      expect(count.cnt).toBe(4);
+      expect(count.cnt).toBe(5);
 
       const settingsCount = db2.prepare('SELECT COUNT(*) as cnt FROM app_settings;').get() as { cnt: number };
       expect(settingsCount.cnt).toBe(2);
 
       closeDb();
     } finally {
+      closeDb();
       if (fs.existsSync(tempDbPath)) fs.unlinkSync(tempDbPath);
-      if (fs.existsSync(tempDir)) fs.rmdirSync(tempDir);
+      if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
@@ -175,4 +177,18 @@ describe('Database Layer & Schema Initialization', () => {
     const db2 = getDb();
     expect(db2).toBe(db1);
   });
+
+  it('should include debt_type column and seed Pawning category', () => {
+    const db = initDb(':memory:');
+    const tableInfo = db.prepare("PRAGMA table_info(debts)").all() as Array<{ name: string; type: string; dflt_value: string }>;
+    const debtTypeCol = tableInfo.find((col) => col.name === 'debt_type');
+    expect(debtTypeCol).toBeDefined();
+    expect(debtTypeCol?.dflt_value).toContain("'standard'");
+
+    const pawningCat = db.prepare("SELECT * FROM categories WHERE name = 'Pawning'").get() as any;
+    expect(pawningCat).toBeDefined();
+    expect(pawningCat.color).toBe('#F59E0B');
+    expect(pawningCat.icon).toBe('gem');
+  });
 });
+
