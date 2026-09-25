@@ -927,5 +927,230 @@ describe('Express REST API & Server Integration Tests', () => {
       expect(res.body).toEqual({ error: 'Endpoint not found' });
     });
   });
+
+  describe('9. Pawning Debt Full End-to-End Integration Suite', () => {
+    let cookie: string;
+    let categoryId: number;
+
+    beforeEach(async () => {
+      cookie = await getAuthCookie();
+      const cats = (
+        await request(app).get('/api/categories').set('Cookie', cookie)
+      ).body;
+      categoryId = cats[0].id;
+    });
+
+    it('executes full pawning lifecycle: creation, 3-month compounding, base update, month 2 payment, payment undo, mark done, and reactivation', async () => {
+      // 1. Create pawning debt with start_month 2026-01, 1000 USD at 2% monthly interest
+      const createRes = await request(app)
+        .post('/api/debts')
+        .set('Cookie', cookie)
+        .send({
+          category_id: categoryId,
+          name: 'Pawned Gold Chain E2E',
+          total_amount: 1000,
+          interest_rate: 2.0,
+          debt_type: 'pawning',
+          start_month: '2026-01',
+          currency: 'USD',
+        });
+
+      expect(createRes.status).toBe(201);
+      const debtId = createRes.body.id;
+      expect(debtId).toBeGreaterThan(0);
+      expect(createRes.body.debt_type).toBe('pawning');
+      expect(createRes.body.total_amount).toBe(1000);
+      expect(createRes.body.monthly_payment).toBe(20);
+      expect(createRes.body.remaining_balance).toBe(1000);
+      expect(createRes.body.is_active).toBe(1);
+
+      // 2. Compounding across 3 months with zero payments:
+      // Month 1 (2026-01): Base = 1000, interest due = 20, accrued = 0
+      const debtsM1 = await request(app)
+        .get('/api/debts?month=2026-01&currency=USD')
+        .set('Cookie', cookie);
+      const pawnM1 = debtsM1.body.find((d: any) => d.id === debtId);
+      expect(pawnM1.remaining_balance).toBe(1000);
+      expect(pawnM1.monthly_payment).toBe(20);
+      expect(pawnM1.accrued_interest).toBe(0);
+      expect(pawnM1.total_pawn_payoff).toBe(1000);
+      expect(pawnM1.is_paid).toBe(false);
+
+      const summaryM1 = await request(app)
+        .get('/api/summary?month=2026-01&currency=USD')
+        .set('Cookie', cookie);
+      expect(summaryM1.body.total_debt).toBe(1000);
+      expect(summaryM1.body.monthly_obligations).toBe(20);
+      expect(summaryM1.body.pending_this_month).toBe(20);
+      expect(summaryM1.body.paid_this_month).toBe(0);
+
+      // Month 2 (2026-02): Unpaid 20 compounds -> balance = 1020, interest = 20.40, accrued = 20
+      const debtsM2 = await request(app)
+        .get('/api/debts?month=2026-02&currency=USD')
+        .set('Cookie', cookie);
+      const pawnM2 = debtsM2.body.find((d: any) => d.id === debtId);
+      expect(pawnM2.remaining_balance).toBe(1020);
+      expect(pawnM2.monthly_payment).toBe(20.4);
+      expect(pawnM2.accrued_interest).toBe(20);
+      expect(pawnM2.is_paid).toBe(false);
+
+      const summaryM2 = await request(app)
+        .get('/api/summary?month=2026-02&currency=USD')
+        .set('Cookie', cookie);
+      expect(summaryM2.body.total_debt).toBe(1020);
+      expect(summaryM2.body.monthly_obligations).toBe(20.4);
+
+      // Month 3 (2026-03): Unpaid 20.40 compounds -> balance = 1040.40, interest = 20.81, accrued = 40.40
+      const debtsM3 = await request(app)
+        .get('/api/debts?month=2026-03&currency=USD')
+        .set('Cookie', cookie);
+      const pawnM3 = debtsM3.body.find((d: any) => d.id === debtId);
+      expect(pawnM3.remaining_balance).toBe(1040.4);
+      expect(pawnM3.monthly_payment).toBe(20.81);
+      expect(pawnM3.accrued_interest).toBe(40.4);
+
+      const summaryM3 = await request(app)
+        .get('/api/summary?month=2026-03&currency=USD')
+        .set('Cookie', cookie);
+      expect(summaryM3.body.total_debt).toBe(1040.4);
+      expect(summaryM3.body.monthly_obligations).toBe(20.81);
+
+      // 3. Update base amount to 2000 and verify subsequent months recalculate
+      const updateBaseRes = await request(app)
+        .put(`/api/debts/${debtId}`)
+        .set('Cookie', cookie)
+        .send({ total_amount: 2000 });
+
+      expect(updateBaseRes.status).toBe(200);
+      expect(updateBaseRes.body.total_amount).toBe(2000);
+      expect(updateBaseRes.body.monthly_payment).toBe(40); // 2% of 2000
+
+      // Re-check Month 1 with 2000 base
+      const debtsM1New = (await request(app).get('/api/debts?month=2026-01').set('Cookie', cookie)).body;
+      const pawnM1New = debtsM1New.find((d: any) => d.id === debtId);
+      expect(pawnM1New.remaining_balance).toBe(2000);
+      expect(pawnM1New.monthly_payment).toBe(40);
+
+      // Re-check Month 2 with 2000 base -> balance = 2040, interest = 40.80
+      const debtsM2New = (await request(app).get('/api/debts?month=2026-02').set('Cookie', cookie)).body;
+      const pawnM2New = debtsM2New.find((d: any) => d.id === debtId);
+      expect(pawnM2New.remaining_balance).toBe(2040);
+      expect(pawnM2New.monthly_payment).toBe(40.8);
+      expect(pawnM2New.accrued_interest).toBe(40);
+
+      // Re-check Month 3 with 2000 base -> balance = 2080.80, interest = 41.62
+      const debtsM3New = (await request(app).get('/api/debts?month=2026-03').set('Cookie', cookie)).body;
+      const pawnM3New = debtsM3New.find((d: any) => d.id === debtId);
+      expect(pawnM3New.remaining_balance).toBe(2080.8);
+      expect(pawnM3New.monthly_payment).toBe(41.62);
+      expect(pawnM3New.accrued_interest).toBe(80.8);
+
+      // 4. Pay monthly interest in Month 2 (40.80)
+      const payM2Res = await request(app)
+        .post('/api/payments')
+        .set('Cookie', cookie)
+        .send({
+          debt_id: debtId,
+          amount: 40.8,
+          currency: 'USD',
+          payment_date: '2026-02-15',
+          month_period: '2026-02',
+          notes: 'Pay month 2 interest',
+        });
+
+      expect(payM2Res.status).toBe(201);
+      const paymentId = payM2Res.body.payment.id;
+      expect(paymentId).toBeGreaterThan(0);
+
+      // Verify Month 2 is marked paid
+      const debtsM2Paid = (await request(app).get('/api/debts?month=2026-02').set('Cookie', cookie)).body;
+      const pawnM2Paid = debtsM2Paid.find((d: any) => d.id === debtId);
+      expect(pawnM2Paid.is_paid).toBe(true);
+      expect(pawnM2Paid.paid_amount).toBe(40.8);
+
+      const summaryM2Paid = (await request(app).get('/api/summary?month=2026-02').set('Cookie', cookie)).body;
+      expect(summaryM2Paid.paid_this_month).toBe(40.8);
+      expect(summaryM2Paid.pending_this_month).toBe(0);
+
+      // Verify Month 3 compounding: Month 2 interest was fully paid, so Month 3 enters with balance 2040, interest 40.80
+      const debtsM3AfterM2Pay = (await request(app).get('/api/debts?month=2026-03').set('Cookie', cookie)).body;
+      const pawnM3AfterM2Pay = debtsM3AfterM2Pay.find((d: any) => d.id === debtId);
+      expect(pawnM3AfterM2Pay.remaining_balance).toBe(2040);
+      expect(pawnM3AfterM2Pay.monthly_payment).toBe(40.8);
+      expect(pawnM3AfterM2Pay.accrued_interest).toBe(40);
+      expect(pawnM3AfterM2Pay.is_paid).toBe(false);
+
+      const summaryM3AfterM2Pay = (await request(app).get('/api/summary?month=2026-03').set('Cookie', cookie)).body;
+      expect(summaryM3AfterM2Pay.total_debt).toBe(2040);
+      expect(summaryM3AfterM2Pay.monthly_obligations).toBe(40.8);
+
+      // 5. Undo payment in Month 2
+      const undoPayRes = await request(app)
+        .delete(`/api/payments/${paymentId}`)
+        .set('Cookie', cookie);
+
+      expect(undoPayRes.status).toBe(200);
+      expect(undoPayRes.body.success).toBe(true);
+
+      // Verify Month 2 is now unpaid again
+      const debtsM2Reverted = (await request(app).get('/api/debts?month=2026-02').set('Cookie', cookie)).body;
+      const pawnM2Reverted = debtsM2Reverted.find((d: any) => d.id === debtId);
+      expect(pawnM2Reverted.is_paid).toBe(false);
+      expect(pawnM2Reverted.paid_amount).toBe(0);
+
+      // Verify Month 3 returns to compounding month 2 unpaid interest (2080.80)
+      const debtsM3Reverted = (await request(app).get('/api/debts?month=2026-03').set('Cookie', cookie)).body;
+      const pawnM3Reverted = debtsM3Reverted.find((d: any) => d.id === debtId);
+      expect(pawnM3Reverted.remaining_balance).toBe(2080.8);
+      expect(pawnM3Reverted.monthly_payment).toBe(41.62);
+      expect(pawnM3Reverted.accrued_interest).toBe(80.8);
+
+      // 6. Mark Done (Redeem / Settle collateral)
+      const markDoneRes = await request(app)
+        .put(`/api/debts/${debtId}`)
+        .set('Cookie', cookie)
+        .send({
+          is_active: 0,
+          remaining_balance: 0,
+        });
+
+      expect(markDoneRes.status).toBe(200);
+      expect(markDoneRes.body.is_active).toBe(0);
+      expect(markDoneRes.body.remaining_balance).toBe(0);
+
+      // Inactive pawn with no payments in Month 3 is excluded from active obligations list
+      const debtsM3Done = (await request(app).get('/api/debts?month=2026-03').set('Cookie', cookie)).body;
+      expect(debtsM3Done.some((d: any) => d.id === debtId)).toBe(false);
+
+      const summaryM3Done = (await request(app).get('/api/summary?month=2026-03').set('Cookie', cookie)).body;
+      expect(summaryM3Done.total_debt).toBe(0);
+      expect(summaryM3Done.monthly_obligations).toBe(0);
+
+      // 7. Reactivate pawning debt
+      const reactivateRes = await request(app)
+        .put(`/api/debts/${debtId}`)
+        .set('Cookie', cookie)
+        .send({
+          is_active: 1,
+          remaining_balance: 2000,
+        });
+
+      expect(reactivateRes.status).toBe(200);
+      expect(reactivateRes.body.is_active).toBe(1);
+      expect(reactivateRes.body.remaining_balance).toBe(2000);
+
+      // Reactivated debt reappears in Month 3 with dynamic compounding restored
+      const debtsM3Reactivated = (await request(app).get('/api/debts?month=2026-03').set('Cookie', cookie)).body;
+      const pawnM3Reactivated = debtsM3Reactivated.find((d: any) => d.id === debtId);
+      expect(pawnM3Reactivated).toBeDefined();
+      expect(pawnM3Reactivated.remaining_balance).toBe(2080.8);
+      expect(pawnM3Reactivated.monthly_payment).toBe(41.62);
+      expect(pawnM3Reactivated.accrued_interest).toBe(80.8);
+
+      const summaryM3Reactivated = (await request(app).get('/api/summary?month=2026-03').set('Cookie', cookie)).body;
+      expect(summaryM3Reactivated.total_debt).toBe(2080.8);
+      expect(summaryM3Reactivated.monthly_obligations).toBe(41.62);
+    });
+  });
 });
 

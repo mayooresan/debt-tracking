@@ -1452,6 +1452,108 @@ describe('Debt & Payment Core Service', () => {
       expect(summaryM2.total_debt).toBe(1176.47);
       expect(summaryM2.monthly_obligations).toBe(23.53);
     });
+
+    it('should execute full end-to-end service integration lifecycle: creation, 3-month compounding, base update, month 2 payment, undo, mark done, and reactivation', () => {
+      const cat = createCategory(db, { name: 'Pawn Service E2E' });
+
+      // 1. Create debt: 1000 USD at 2% monthly starting 2026-01
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Diamond Ring Pawn',
+        total_amount: 1000,
+        interest_rate: 2,
+        start_month: '2026-01',
+        debt_type: 'pawning',
+      });
+      expect(debt.monthly_payment).toBe(20);
+      expect(debt.debt_type).toBe('pawning');
+
+      // 2. Compounding across 3 months:
+      // Month 1: 1000 balance, 20 monthly payment, 0 accrued
+      const m1 = listDebtsWithMonthlyStatus(db, '2026-01', 'USD').find((d) => d.id === debt.id)!;
+      expect(m1.remaining_balance).toBe(1000);
+      expect(m1.monthly_payment).toBe(20);
+      expect(m1.accrued_interest).toBe(0);
+
+      // Month 2: 1020 balance, 20.40 monthly payment, 20 accrued
+      const m2 = listDebtsWithMonthlyStatus(db, '2026-02', 'USD').find((d) => d.id === debt.id)!;
+      expect(m2.remaining_balance).toBe(1020);
+      expect(m2.monthly_payment).toBe(20.4);
+      expect(m2.accrued_interest).toBe(20);
+
+      // Month 3: 1040.40 balance, 20.81 monthly payment, 40.40 accrued
+      const m3 = listDebtsWithMonthlyStatus(db, '2026-03', 'USD').find((d) => d.id === debt.id)!;
+      expect(m3.remaining_balance).toBe(1040.4);
+      expect(m3.monthly_payment).toBe(20.81);
+      expect(m3.accrued_interest).toBe(40.4);
+
+      // 3. Base amount update to 2000 and subsequent recalculation
+      const updatedDebt = updateDebt(db, debt.id, { total_amount: 2000 });
+      expect(updatedDebt.total_amount).toBe(2000);
+      expect(updatedDebt.monthly_payment).toBe(40);
+
+      const m2Recalc = listDebtsWithMonthlyStatus(db, '2026-02', 'USD').find((d) => d.id === debt.id)!;
+      expect(m2Recalc.remaining_balance).toBe(2040);
+      expect(m2Recalc.monthly_payment).toBe(40.8);
+      expect(m2Recalc.accrued_interest).toBe(40);
+
+      const m3Recalc = listDebtsWithMonthlyStatus(db, '2026-03', 'USD').find((d) => d.id === debt.id)!;
+      expect(m3Recalc.remaining_balance).toBe(2080.8);
+      expect(m3Recalc.monthly_payment).toBe(41.62);
+      expect(m3Recalc.accrued_interest).toBe(80.8);
+
+      // 4. Pay monthly interest in Month 2 (40.80)
+      const paymentRecord = recordPayment(db, {
+        debt_id: debt.id,
+        amount: 40.8,
+        currency: 'USD',
+        payment_date: '2026-02-15',
+        month_period: '2026-02',
+      });
+      expect(paymentRecord.payment.id).toBeGreaterThan(0);
+
+      // Verify Month 2 is marked paid
+      const m2Paid = listDebtsWithMonthlyStatus(db, '2026-02', 'USD').find((d) => d.id === debt.id)!;
+      expect(m2Paid.is_paid).toBe(true);
+      expect(m2Paid.paid_amount).toBe(40.8);
+
+      // Verify Month 3 compounding: Month 2 interest was fully paid, does not compound
+      const m3AfterPay = listDebtsWithMonthlyStatus(db, '2026-03', 'USD').find((d) => d.id === debt.id)!;
+      expect(m3AfterPay.remaining_balance).toBe(2040);
+      expect(m3AfterPay.monthly_payment).toBe(40.8);
+      expect(m3AfterPay.accrued_interest).toBe(40);
+      expect(m3AfterPay.is_paid).toBe(false);
+
+      // 5. Undo payment in Month 2
+      const reverted = revertPayment(db, paymentRecord.payment.id);
+      expect(reverted.success).toBe(true);
+
+      const m2Reverted = listDebtsWithMonthlyStatus(db, '2026-02', 'USD').find((d) => d.id === debt.id)!;
+      expect(m2Reverted.is_paid).toBe(false);
+
+      const m3Reverted = listDebtsWithMonthlyStatus(db, '2026-03', 'USD').find((d) => d.id === debt.id)!;
+      expect(m3Reverted.remaining_balance).toBe(2080.8);
+      expect(m3Reverted.monthly_payment).toBe(41.62);
+      expect(m3Reverted.accrued_interest).toBe(80.8);
+
+      // 6. Mark Done (Redeem / Settle collateral)
+      const settled = updateDebt(db, debt.id, { is_active: 0, remaining_balance: 0 });
+      expect(settled.is_active).toBe(0);
+      expect(settled.remaining_balance).toBe(0);
+
+      const m3Settled = listDebtsWithMonthlyStatus(db, '2026-03', 'USD');
+      expect(m3Settled.some((d) => d.id === debt.id)).toBe(false);
+
+      // 7. Reactivation
+      const reactivated = updateDebt(db, debt.id, { is_active: 1, remaining_balance: 2000 });
+      expect(reactivated.is_active).toBe(1);
+
+      const m3Reactivated = listDebtsWithMonthlyStatus(db, '2026-03', 'USD').find((d) => d.id === debt.id)!;
+      expect(m3Reactivated).toBeDefined();
+      expect(m3Reactivated.remaining_balance).toBe(2080.8);
+      expect(m3Reactivated.monthly_payment).toBe(41.62);
+      expect(m3Reactivated.accrued_interest).toBe(80.8);
+    });
   });
 });
 
