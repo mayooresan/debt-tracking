@@ -204,6 +204,30 @@ describe('Frontend API Client (client/src/api/client.ts)', () => {
       expect(capturedBody).toEqual(input);
     });
 
+    it('createDebt(data) with debt_type pawning sends debt_type in payload', async () => {
+      let capturedBody: any;
+      global.fetch = vi.fn().mockImplementation(async (_url: string, opts?: RequestInit) => {
+        capturedBody = JSON.parse(opts?.body as string);
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ id: 11, ...capturedBody }),
+        } as Response;
+      });
+
+      const input = {
+        category_id: 2,
+        name: 'Gold Ring Pawn',
+        total_amount: 500,
+        interest_rate: 3,
+        start_month: '2026-09',
+        debt_type: 'pawning' as const,
+      };
+      const created = await createDebt(input);
+      expect(created.id).toBe(11);
+      expect(capturedBody.debt_type).toBe('pawning');
+    });
+
     it('updateDebt(id, data) calls PUT /api/debts/:id', async () => {
       let targetUrl = '';
       let capturedBody: any;
@@ -221,6 +245,24 @@ describe('Frontend API Client (client/src/api/client.ts)', () => {
       expect(targetUrl).toBe('/api/debts/5');
       expect(updated.monthly_payment).toBe(400);
       expect(capturedBody).toEqual({ monthly_payment: 400 });
+    });
+
+    it('updateDebt(id, data) can update debt_type to pawning', async () => {
+      let targetUrl = '';
+      let capturedBody: any;
+      global.fetch = vi.fn().mockImplementation(async (url: string, opts?: RequestInit) => {
+        targetUrl = url;
+        capturedBody = JSON.parse(opts?.body as string);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ id: 5, ...capturedBody }),
+        } as Response;
+      });
+
+      const updated = await updateDebt(5, { debt_type: 'pawning' });
+      expect(targetUrl).toBe('/api/debts/5');
+      expect(capturedBody.debt_type).toBe('pawning');
     });
 
     it('deleteDebt(id) calls DELETE /api/debts/:id', async () => {
