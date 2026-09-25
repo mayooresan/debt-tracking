@@ -15,6 +15,8 @@ import {
   getMonthlySummary,
   getPaymentsByDebtId,
   getPaymentsByMonth,
+  getMonthsBetween,
+  calculatePawningState,
 } from '../src/services/debt';
 
 describe('Debt & Payment Core Service', () => {
@@ -1247,6 +1249,144 @@ describe('Debt & Payment Core Service', () => {
       const summaryNov = getMonthlySummary(db, '2026-11', 'USD');
       expect(summaryNov.monthly_obligations).toBe(350);
       expect(summaryNov.pending_this_month).toBe(350);
+    });
+  });
+
+  describe('Pawning Compounding Engine & Monthly Status Calculations', () => {
+    it('should compound unpaid monthly interest across following months for pawning debts', () => {
+      const cat = createCategory(db, { name: 'Pawn Shop' });
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Gold Pawn',
+        total_amount: 1000,
+        interest_rate: 2, // 2% per month
+        start_month: '2026-01',
+        debt_type: 'pawning',
+        monthly_payment: 20,
+      });
+
+      // Query month 2026-01: Month 1
+      // Principal: 1000, Interest due: 20. Total debt: 1000
+      const m1 = listDebtsWithMonthlyStatus(db, '2026-01');
+      const pawnM1 = m1.find((d) => d.id === debt.id)!;
+      expect(pawnM1.monthly_payment).toBe(20);
+      expect(pawnM1.remaining_balance).toBe(1000);
+      expect(pawnM1.accrued_interest).toBe(0);
+      expect(pawnM1.total_pawn_payoff).toBe(1000);
+      expect(pawnM1.is_paid).toBe(false);
+
+      // Query month 2026-02: Month 2 with Month 1 UNPAID
+      // Compounded Balance: 1000 + 20 = 1020.
+      // Interest due for Month 2: 1020 * 2% = 20.40.
+      const m2 = listDebtsWithMonthlyStatus(db, '2026-02');
+      const pawnM2 = m2.find((d) => d.id === debt.id)!;
+      expect(pawnM2.remaining_balance).toBe(1020);
+      expect(pawnM2.monthly_payment).toBe(20.4);
+      expect(pawnM2.accrued_interest).toBe(20);
+      expect(pawnM2.total_pawn_payoff).toBe(1020);
+      expect(pawnM2.is_paid).toBe(false);
+
+      // Query month 2026-03: Month 3 with Month 1 & Month 2 UNPAID
+      // Compounded Balance: 1020 + 20.40 = 1040.40.
+      // Interest due for Month 3: 1040.40 * 2% = 20.81.
+      const m3 = listDebtsWithMonthlyStatus(db, '2026-03');
+      const pawnM3 = m3.find((d) => d.id === debt.id)!;
+      expect(pawnM3.remaining_balance).toBe(1040.4);
+      expect(pawnM3.monthly_payment).toBe(20.81);
+      expect(pawnM3.accrued_interest).toBe(40.4);
+      expect(pawnM3.total_pawn_payoff).toBe(1040.4);
+    });
+
+    it('should NOT compound interest if previous months were paid', () => {
+      const cat = createCategory(db, { name: 'Pawn Shop 2' });
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'Gold Pawn 2',
+        total_amount: 1000,
+        interest_rate: 2, // 2% per month
+        start_month: '2026-01',
+        debt_type: 'pawning',
+        monthly_payment: 20,
+      });
+
+      // Pay Month 1 interest in 2026-01
+      recordPayment(db, {
+        debt_id: debt.id,
+        amount: 20,
+        currency: 'USD',
+        payment_date: '2026-01-15',
+        month_period: '2026-01',
+      });
+
+      // Query Month 2026-02:
+      // Month 1 was paid, so balance remains 1000. Interest due is still 20!
+      const m2 = listDebtsWithMonthlyStatus(db, '2026-02');
+      const pawnM2 = m2.find((d) => d.id === debt.id)!;
+      expect(pawnM2.remaining_balance).toBe(1000);
+      expect(pawnM2.monthly_payment).toBe(20);
+      expect(pawnM2.accrued_interest).toBe(0);
+      expect(pawnM2.is_paid).toBe(false);
+    });
+
+    it('should handle getMonthsBetween helper correctly', () => {
+      expect(getMonthsBetween('2026-01', '2026-03')).toEqual(['2026-01', '2026-02', '2026-03']);
+      expect(getMonthsBetween('2026-11', '2027-02')).toEqual(['2026-11', '2026-12', '2027-01', '2027-02']);
+      expect(getMonthsBetween('2026-01', '2026-01')).toEqual(['2026-01']);
+      expect(getMonthsBetween('2026-05', '2026-01')).toEqual([]);
+    });
+
+    it('should calculate calculatePawningState correctly with excess payment reducing principal', () => {
+      const debt = {
+        total_amount: 1000,
+        remaining_balance: 1000,
+        interest_rate: 2,
+        start_month: '2026-01',
+      };
+      // Month 1: 20 interest + 200 principal payment = 220 paid
+      const payments = [
+        {
+          id: 1,
+          debt_id: 1,
+          amount: 220,
+          currency: 'USD',
+          payment_date: '2026-01-10',
+          month_period: '2026-01',
+          notes: null,
+          created_at: '2026-01-10',
+        },
+      ];
+
+      const stateM2 = calculatePawningState(debt, '2026-02', payments);
+      // Base principal reduced by 200 -> 800
+      expect(stateM2.currentBalance).toBe(800);
+      // Interest on 800 at 2% = 16
+      expect(stateM2.monthlyInterest).toBe(16);
+      expect(stateM2.accruedInterest).toBe(0);
+      expect(stateM2.isPaid).toBe(false);
+    });
+
+    it('should convert pawning debts to target currency in listDebtsWithMonthlyStatus', () => {
+      const cat = createCategory(db, { name: 'Pawn EUR' });
+      const debt = createDebt(db, {
+        category_id: cat.id,
+        name: 'EUR Pawn',
+        total_amount: 1000,
+        interest_rate: 2, // 20 EUR monthly interest
+        start_month: '2026-01',
+        debt_type: 'pawning',
+        currency: 'EUR',
+      });
+
+      // In 2026-02 unpaid: remaining_balance = 1020 EUR, monthly_payment = 20.40 EUR
+      // EUR rate against USD is 0.85 (1 EUR = 1 / 0.85 = 1.17647 USD)
+      // converted_remaining_balance = 1020 / 0.85 = 1200
+      // converted_monthly_payment = 20.40 / 0.85 = 24
+      const debts = listDebtsWithMonthlyStatus(db, '2026-02', 'USD');
+      const pawnDebt = debts.find((d) => d.id === debt.id)!;
+      expect(pawnDebt.remaining_balance).toBe(1020);
+      expect(pawnDebt.monthly_payment).toBe(20.4);
+      expect(pawnDebt.converted_remaining_balance).toBe(1200);
+      expect(pawnDebt.converted_monthly_payment).toBe(24);
     });
   });
 });

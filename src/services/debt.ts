@@ -596,6 +596,112 @@ export function getPaymentsByMonth(db: Database, monthPeriod: string): Payment[]
 // ==========================================
 
 /**
+ * Generates an array of month strings (YYYY-MM) between startMonth and endMonth inclusive.
+ */
+export function getMonthsBetween(startMonth: string, endMonth: string): string[] {
+  const months: string[] = [];
+  if (!startMonth || !endMonth || !/^\d{4}-\d{2}$/.test(startMonth) || !/^\d{4}-\d{2}$/.test(endMonth)) {
+    return months;
+  }
+  let [currYear, currMonth] = startMonth.split('-').map(Number);
+  const [endYear, endMonthNum] = endMonth.split('-').map(Number);
+
+  while (currYear < endYear || (currYear === endYear && currMonth <= endMonthNum)) {
+    months.push(`${currYear}-${String(currMonth).padStart(2, '0')}`);
+    currMonth++;
+    if (currMonth > 12) {
+      currMonth = 1;
+      currYear++;
+    }
+    if (months.length > 1200) break;
+  }
+  return months;
+}
+
+/**
+ * Calculates pawning debt compounding state up to targetMonth.
+ */
+export function calculatePawningState(
+  debt: { total_amount: number; remaining_balance: number; interest_rate: number | null; start_month: string; is_active?: number },
+  targetMonth: string,
+  payments: Payment[]
+): {
+  currentBalance: number;
+  monthlyInterest: number;
+  accruedInterest: number;
+  isPaid: boolean;
+  paidAmount: number;
+  paymentId: number | null;
+  paidAt: string | null;
+} {
+  const rateFraction = (debt.interest_rate || 0) / 100;
+  const startMonth = debt.start_month || targetMonth;
+
+  if (targetMonth < startMonth) {
+    const interest = Math.round(debt.total_amount * rateFraction * 100) / 100;
+    return {
+      currentBalance: debt.total_amount,
+      monthlyInterest: interest,
+      accruedInterest: 0,
+      isPaid: false,
+      paidAmount: 0,
+      paymentId: null,
+      paidAt: null,
+    };
+  }
+
+  if (debt.is_active === 0 && debt.remaining_balance === 0) {
+    const targetPayments = payments.filter((p) => p.month_period === targetMonth);
+    const paidThisMonth = targetPayments.reduce((sum, p) => sum + p.amount, 0);
+    const lastTargetPayment = targetPayments[targetPayments.length - 1];
+    return {
+      currentBalance: 0,
+      monthlyInterest: 0,
+      accruedInterest: 0,
+      isPaid: paidThisMonth > 0,
+      paidAmount: paidThisMonth,
+      paymentId: lastTargetPayment ? lastTargetPayment.id : null,
+      paidAt: lastTargetPayment ? lastTargetPayment.payment_date : null,
+    };
+  }
+
+  const months = getMonthsBetween(startMonth, targetMonth);
+  let balance = debt.total_amount;
+
+  for (let i = 0; i < months.length - 1; i++) {
+    const m = months[i];
+    const monthInterest = Math.round(balance * rateFraction * 100) / 100;
+    const mPayments = payments.filter((p) => p.month_period === m);
+    const paidForMonth = mPayments.reduce((sum, p) => sum + p.amount, 0);
+
+    if (paidForMonth < monthInterest) {
+      // Unpaid interest compounds into balance for next month
+      balance = Math.round((balance + (monthInterest - paidForMonth)) * 100) / 100;
+    } else if (paidForMonth > monthInterest) {
+      // Excess payment reduces base principal
+      balance = Math.max(0, Math.round((balance - (paidForMonth - monthInterest)) * 100) / 100);
+    }
+  }
+
+  const currentMonthInterest = Math.round(balance * rateFraction * 100) / 100;
+  const targetPayments = payments.filter((p) => p.month_period === targetMonth);
+  const paidThisMonth = targetPayments.reduce((sum, p) => sum + p.amount, 0);
+  const lastTargetPayment = targetPayments[targetPayments.length - 1];
+
+  const accruedInterest = Math.max(0, Math.round((balance - debt.total_amount) * 100) / 100);
+
+  return {
+    currentBalance: balance,
+    monthlyInterest: currentMonthInterest,
+    accruedInterest,
+    isPaid: paidThisMonth >= currentMonthInterest && currentMonthInterest > 0,
+    paidAmount: paidThisMonth,
+    paymentId: lastTargetPayment ? lastTargetPayment.id : null,
+    paidAt: lastTargetPayment ? lastTargetPayment.payment_date : null,
+  };
+}
+
+/**
  * Lists debts with their monthly payment status for a specific monthPeriod (YYYY-MM).
  * Computes is_paid, paid_amount, paid_at, and converts monthly_payment & remaining_balance
  * to the specified base currency (or defaults to system base_currency).
@@ -638,31 +744,71 @@ export function listDebtsWithMonthlyStatus(
     ORDER BY d.due_day ASC, d.id ASC
   `).all(monthPeriod) as any[];
 
+  const pawningDebtIds = rows
+    .filter((r) => (r.debt_type || '').toLowerCase() === 'pawning')
+    .map((r) => r.id);
+
+  const pawningPaymentsMap = new Map<number, Payment[]>();
+  if (pawningDebtIds.length > 0) {
+    const placeholders = pawningDebtIds.map(() => '?').join(',');
+    const allPawningPayments = database
+      .prepare(
+        `SELECT * FROM payments WHERE debt_id IN (${placeholders}) ORDER BY payment_date ASC, id ASC`
+      )
+      .all(...pawningDebtIds) as Payment[];
+
+    for (const payment of allPawningPayments) {
+      if (!pawningPaymentsMap.has(payment.debt_id)) {
+        pawningPaymentsMap.set(payment.debt_id, []);
+      }
+      pawningPaymentsMap.get(payment.debt_id)!.push(payment);
+    }
+  }
+
   return rows.map((row) => {
-    const is_paid = Boolean(row.payment_id && row.paid_amount > 0);
-    const paid_amount = row.paid_amount ? Math.round(row.paid_amount * 100) / 100 : 0;
-    const paid_at = row.paid_at || null;
-    const payment_id = row.payment_id || null;
+    let is_paid = Boolean(row.payment_id && row.paid_amount > 0);
+    let paid_amount = row.paid_amount ? Math.round(row.paid_amount * 100) / 100 : 0;
+    let paid_at = row.paid_at || null;
+    let payment_id = row.payment_id || null;
+    let monthly_payment = row.monthly_payment;
+    let remaining_balance = row.remaining_balance;
+    let accrued_interest = 0;
+    let total_pawn_payoff = remaining_balance;
+
+    if (row.debt_type === 'pawning') {
+      const debtPayments = pawningPaymentsMap.get(row.id) || [];
+      const pawnState = calculatePawningState(row, monthPeriod, debtPayments);
+      monthly_payment = pawnState.monthlyInterest;
+      remaining_balance = pawnState.currentBalance;
+      accrued_interest = pawnState.accruedInterest;
+      total_pawn_payoff = pawnState.currentBalance;
+      is_paid = pawnState.isPaid;
+      paid_amount = pawnState.paidAmount;
+      paid_at = pawnState.paidAt;
+      payment_id = pawnState.paymentId;
+    }
 
     const start_month = row.start_month || monthPeriod;
     const is_upcoming = Boolean(row.start_month && row.start_month > monthPeriod && !is_paid);
 
     const converted_monthly_payment = convertAmount(
-      row.monthly_payment,
+      monthly_payment,
       row.currency,
       targetBaseCurrency,
       rates
     );
     const converted_remaining_balance = convertAmount(
-      row.remaining_balance,
+      remaining_balance,
       row.currency,
       targetBaseCurrency,
       rates
     );
 
     const remaining_months =
-      row.remaining_balance > 0 && row.monthly_payment > 0
-        ? Math.ceil(row.remaining_balance / row.monthly_payment)
+      row.debt_type === 'pawning'
+        ? 0
+        : remaining_balance > 0 && monthly_payment > 0
+        ? Math.ceil(remaining_balance / monthly_payment)
         : 0;
 
     let projected_payoff_date: string | null = null;
@@ -693,8 +839,8 @@ export function listDebtsWithMonthlyStatus(
       category_id: row.category_id,
       name: row.name,
       total_amount: row.total_amount,
-      remaining_balance: row.remaining_balance,
-      monthly_payment: row.monthly_payment,
+      remaining_balance,
+      monthly_payment,
       currency: row.currency,
       due_day: row.due_day,
       interest_rate: row.interest_rate,
@@ -718,6 +864,8 @@ export function listDebtsWithMonthlyStatus(
       projected_payoff_date,
       converted_monthly_payment,
       converted_remaining_balance,
+      accrued_interest,
+      total_pawn_payoff,
     };
   });
 }
